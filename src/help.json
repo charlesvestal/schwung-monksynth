@@ -1,0 +1,30 @@
+{
+  "title": "MonkSynth",
+  "summary": "Monophonic formant (FOF) vocal synthesizer with twelve singing characters. An homage to the Delay Lama plug-in by AudioNerdz.",
+  "sections": [
+    {
+      "heading": "Playing it",
+      "body": "Monophonic with a 16-deep note stack, so overlapping notes retune rather than retrigger, and releasing the top note falls back to the one still held. Vowel is the voice: sweep it and the monk sings through OO, OH, AH, EH, EE. Head Size sets the size of the vocal tract, and higher is BRIGHTER and smaller-sounding, not darker."
+    },
+    {
+      "heading": "Press a pad harder",
+      "body": "Pad pressure sweeps the Vowel. That is the Delay Lama gesture: the original did it with the pitch wheel, and Move has neither a pitch wheel nor a mod wheel, so pressure takes its place. Expression > Pressure picks what it drives: Vowel, Both, Both Inv, or Pitch. Only the note on top of the stack is honoured, so a held lower pad cannot drag the vowel around under a melody."
+    },
+    {
+      "heading": "The twelve characters",
+      "body": "Characters are PRESETS, on the Presets page. Jog through them and each one loads its own voice and its own face. Six are hand-tuned (Monk, Fish, Unicorn, Little Girl, Old Man, Cow); six are upstream's own factory patches wearing new faces (Dog, Ghost, Fire Fighter, Punk, Pizza, Cat). Loading a character never touches Vowel, which is a performance position rather than part of the voice."
+    },
+    {
+      "heading": "Watching it sing",
+      "body": "The Who cell shows which character is loaded; it is a readout, not a control. The Vowel cell shows that character's mouth, and it moves as you turn. Hold Vowel and a card floats up with the face and the vowel name. Click Face for the whole character, where the jog steps through all twelve. The mouth advances in 24 visible frames rather than gliding, which is how the original moved."
+    },
+    {
+      "heading": "Unison and delay",
+      "body": "Unison stacks up to ten detuned voices; Spread varies the vocal-tract size across them, so a stack is a small choir of slightly different singers rather than one singer doubled. The stereo delay is on by default at 0.8 because most of the factory characters were voiced with it."
+    },
+    {
+      "heading": "Credits",
+      "body": "DSP by Jonathan Taylor (github.com/JonET/monksynth), vendored unmodified. MonkSynth is offered free of charge; if you enjoy it you are kindly requested to donate at savetibet.org."
+    }
+  ]
+}

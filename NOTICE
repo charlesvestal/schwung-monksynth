@@ -1,0 +1,28 @@
+MonkSynth for Schwung
+=====================
+
+The DSP in src/dsp/{synth,voice,delay}.{c,h} and src/dsp/synth_internal.h is
+vendored VERBATIM and is not modified here.
+
+  Upstream:    MonkSynth by Jonathan Taylor
+               https://github.com/JonET/monksynth
+  Via:         MonkSynth for iOS by Charles Vestal
+               https://github.com/charlesvestal/monksynth-ios
+  Licence:     MIT (see LICENSE)
+
+MonkSynth is itself an homage to the Delay Lama VST plug-in by AudioNerdz
+(2002).
+
+The twelve characters' voices are ported verbatim from the iOS port's
+CharacterVoiceTable (six hand-tuned) and FactoryVoiceTable (six of upstream's
+own factory patches: Dorje, Jamyang, Monastary, Ngawang, Rabten, Tinley).
+
+The twelve FACES in src/ui/canvas.js are NOT ported art. The iOS characters are
+colour bezier drawings with clip masks and alpha, none of which survives a
+128x64 1-bit panel, so the silhouettes were re-authored for this display. What
+is ported verbatim is the rig behind them -- mouth anchors, mouth centre, mouth
+box fraction, eye and head geometry -- because that art is already authored in a
+unit square.
+
+MonkSynth is offered free of charge. If you enjoy it, you are kindly requested
+to make a donation at https://www.savetibet.org
