@@ -2,3 +2,4 @@ build/
 dist/
 faces-out/
 .DS_Store
+build-host/

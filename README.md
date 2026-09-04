@@ -63,6 +63,10 @@ assumed, and all documented at the code:
 for t in tests/*.sh; do bash "$t"; done
 ```
 
+`tests/test_smoke.sh` builds the module natively, `dlopen`s it and drives it the
+way the chain host does — the contract, all twelve presets, MIDI, pad pressure,
+state round-trip, junk input, and the output level across every character.
+
 `tests/test_faces_render.sh` renders all twelve characters across all four
 surfaces to a PNG and asserts each one actually drew, that nothing ran off the
 panel, and that every glyph exists in the device font. Look at the sheet:
@@ -88,6 +92,7 @@ is the Schwung adapter and is ours.
 | `create_instance` | ~0.8 ms (2.58 MB, ten voices' tables) — a brief click on load |
 | `render_block`, mono | 4.3 µs/block |
 | `render_block`, unison 9 | 31.5 µs/block |
+| output level | −21.3 dBFS RMS mean across the twelve, 6.8 dB spread |
 
 Against Schwung's ~2370 µs frame budget, on an Apple Silicon host; scale for
 the Cortex-A72. Unison 10 is comfortably usable.
