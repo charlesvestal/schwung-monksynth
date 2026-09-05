@@ -258,12 +258,28 @@ function arcEyes(u, cxs, fy, hw, depth, shut) {
     for (const cx of cxs) quad(u, cx - hw, fy, cx, fy + d, cx + hw, fy, 1);
 }
 
-/* Sclera + pupil — cow, dog, little girl, unicorn, pizza. */
+/*
+ * Sclera + pupil — cow, dog, little girl, unicorn, pizza.
+ *
+ * AN EYE NEEDS ROOM TO BE A RING WITH A DOT IN IT. At the rig's own radius the
+ * sclera came out about four pixels across and the pupil two, and the two
+ * merged into one solid blob -- every one of these characters ended up with
+ * smudges instead of eyes. So the sclera has a pixel floor, and the pupil is
+ * held to a single pixel whenever the sclera is small enough that anything more
+ * would fill it.
+ *
+ * Both are floors, not scalings: at card and page size they bite, and on a big
+ * surface the rig's own proportions are already right and nothing changes.
+ */
 function roundEyes(u, cxs, fy, r, pupil, shut) {
+    const MIN_SCLERA_PX = 5;
+    const rr = Math.max(r, (MIN_SCLERA_PX * 0.5) / u.s);
+    /* A pupil bigger than this closes the ring back up. */
+    const pr = Math.min(rr * pupil, Math.max((0.5) / u.s, rr - 1.2 / u.s));
     for (const cx of cxs) {
-        if (shut) { uline(u, cx - r, fy, cx + r, fy, 1); continue; }
-        ellipse(u, cx, fy, r, r, false, 1);
-        ellipse(u, cx, fy, r * pupil, r * pupil, true, 1);
+        if (shut) { uline(u, cx - rr, fy, cx + rr, fy, 1); continue; }
+        ellipse(u, cx, fy, rr, rr, false, 1);
+        ellipse(u, cx, fy, pr, pr, true, 1);
     }
 }
 
@@ -466,9 +482,15 @@ const FACES = [
         uline(u, 0.5, 0.68, 0.5, 0.99);                  /* cardigan zip */
     },
     eyes(u, shut, d) {
-        arcEyes(u, [0.44, 0.56], 0.28, 0.032, [0.014, 0.005], shut);
+        /* Wider and set a touch lower than the rig, so the eye is separable
+         * from the brow above it. Deep-set eyes at 0.032 half-width were three
+         * pixels of arc directly under a four-pixel brow, and the pair read as
+         * one dark mass rather than as a face. */
+        arcEyes(u, [0.435, 0.565], 0.292, 0.046, [0.018, 0.006], shut);
         /* The heavy brow is always drawn — it is the age cue, not an eye. */
-        for (const cx of [0.44, 0.56]) quad(u, cx - 0.045, 0.25, cx, 0.225, cx + 0.045, 0.245);
+        /* Lifted clear of the eye: at page size the brow and the arc below it
+         * merged into a single bar and the old man had no eyes at all. */
+        for (const cx of [0.44, 0.56]) quad(u, cx - 0.048, 0.238, cx, 0.210, cx + 0.048, 0.233);
     },
 },
 {
@@ -701,7 +723,16 @@ function mouthShape(face, v) {
 function drawMouth(u, face, vowel, boost, minPx) {
     const [w, h] = mouthShape(face, quantisedVowel(vowel));
     const b = boost || 1;
-    let rw = w * face.mbf * 0.5 * b;
+    /*
+     * THE GAIN IS ON HEIGHT ONLY.
+     *
+     * Applied to both axes it swallowed the muzzles: at EH the dog's aperture
+     * reached 93% of its snout, so the snout read as a solid white blob rather
+     * than as a mouth inside a nose. Width was never the problem -- the anchors
+     * are wide by design and it is the axis that carries the OO..EE morph.
+     * Height is what vanishes at this scale, so height is what is scaled.
+     */
+    let rw = w * face.mbf * 0.5;
     let rh = h * face.mbf * 0.5 * b;
 
     /*
