@@ -313,7 +313,10 @@ const FACES = [
     /* A PROFILE, facing right: one eye, and a mouth off-axis at fx 0.80. */
     anchors: [[0.42,0.30],[0.55,0.46],[0.62,0.62],[0.50,0.48],[0.34,0.28]],
     mc: [0.80,0.56], mbf: 0.20,
-    crop: [0.30,0.16,1.00,0.84], cropFull: [0.00,0.02,1.00,0.98],
+    /* The whole fish, not a head crop: it is a profile creature and the tail is
+     * half of what makes it a fish. The head-only box cut it off, which reads
+     * as a clipped drawing rather than as a close-up. */
+    crop: [0.00,0.14,1.00,0.92], cropFull: [0.00,0.02,1.00,0.98],
     head(u, d) {
         quad(u, 0.16, 0.50, 0.50, 0.20, 0.88, 0.56);      /* back */
         quad(u, 0.88, 0.56, 0.48, 0.90, 0.16, 0.50);      /* belly */
@@ -928,9 +931,30 @@ globalThis.canvas_overlay = {
          */
         const label = vowelName(v);
         const nm = String(face.name);
-        const faceW = Math.min(w, h);
 
-        paintFace(subFrame(c, 0, 0, faceW, h), face, face.cropFull, v, 0, nowMs || 0);
+        /*
+         * The face gets everything the text does not need.
+         *
+         * It was a SQUARE (min(w, h)), which throws away most of a 128x44 band
+         * for any character wider than it is tall -- the fish lost its tail to
+         * the crop and still only filled a quarter of the screen. unit() fits
+         * without stretching, so a wide box simply lets a wide character grow;
+         * a round head is still bound by the height and is unchanged.
+         */
+        const textW = Math.max(c.textWidth(label), c.textWidth(nm));
+        const faceW = Math.max(16, w - textW - 6);
+
+        /*
+         * THE HEAD, not the whole figure.
+         *
+         * cropFull shows the character standing up -- robe, dress, tail -- and
+         * in a 44px band that makes the head about a third of it, which is a
+         * mouth of four pixels on the one screen whose job is showing the
+         * mouth. face.crop is the head-and-props box the cells use, so the same
+         * band gives a head roughly three times the size. The body is what a
+         * 128x64 panel cannot afford here.
+         */
+        paintFace(subFrame(c, 0, 0, faceW, h), face, face.crop, v, 0, nowMs || 0);
 
         const lw = c.textWidth(label);
         const nw = c.textWidth(nm);

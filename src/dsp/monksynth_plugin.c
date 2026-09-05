@@ -642,8 +642,12 @@ static const char CHAIN_PARAMS_JSON[] =
  "{\"key\":\"face\",\"name\":\"Who\",\"short_name\":\"Who\",\"type\":\"int\","
   "\"min\":0,\"max\":11,\"step\":1,\"default\":0,\"access\":\"read\","
   "\"show_value\":false},"
+ /* LIVE: pad pressure drives this past whatever the knob says, so the host
+  * keeps its effective value refreshed every tick and every picture of it --
+  * the cell widget and the face page -- moves with the pressure rather than
+  * sitting frozen where the knob was left. */
  "{\"key\":\"vowel\",\"name\":\"Vowel\",\"short_name\":\"Vow\",\"type\":\"float\","
-  "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5,"
+  "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5,\"live\":true,"
   /* THE MOUTH, and the character it belongs to.
    *
    * `extra_keys` names a value the picture needs that has NO CELL on this page.
@@ -763,7 +767,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return serve(buf, buf_len, CHARACTERS[i].id);
     }
 
-    if (strcmp(key, "vowel") == 0) return snprintf(buf, buf_len, "%.4f", in->vowel);
+    /*
+     * `vowel` and `vowel:base` are the same answer: what the KNOB is set to.
+     * The host asks for `:base` once a key is live, and falls back to the plain
+     * key on a miss -- serving it directly saves that second read on every
+     * refresh of the most-read key on the page.
+     */
+    if (strcmp(key, "vowel") == 0 || strcmp(key, "vowel:base") == 0)
+        return snprintf(buf, buf_len, "%.4f", in->vowel);
 
     /*
      * The DRIVEN vowel, per the `<key>:effective` convention: a plain read of a
