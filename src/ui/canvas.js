@@ -1080,7 +1080,18 @@ globalThis.vowel_card = function (ctx, o) {
     const w = c.width, h = c.height;
     if (w < 24 || h < 16) return;
 
-    const n = (o.raw === null || o.raw === undefined) ? NaN : Number(o.raw);
+    /*
+     * THE SOUNDING VOWEL, not the knob's.
+     *
+     * `raw` is the base -- what the knob is set to -- and `values` carries the
+     * live value merged over it. Pad pressure sweeps this parameter, so the
+     * mouth on this card has to show what is actually being sung; a card that
+     * showed the knob would contradict the cell right next to it.
+     */
+    const live = o.values ? Number(o.values.vowel) : NaN;
+    const n = Number.isFinite(live)
+        ? live
+        : ((o.raw === null || o.raw === undefined) ? NaN : Number(o.raw));
 
     /* The name, always — the card is present and honest even knowing nothing. */
     c.print(0, 0, String(o.name || "Vowel"), 1);
