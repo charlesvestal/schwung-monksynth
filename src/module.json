@@ -18,8 +18,8 @@
     "chain_params": [
       {
         "key": "face",
-        "name": "Who",
-        "short_name": "Who",
+        "name": "Character",
+        "short_name": "Char",
         "type": "int",
         "min": 0,
         "max": 11,
@@ -110,7 +110,7 @@
       },
       {
         "key": "vibrato_rate",
-        "name": "Vib Rate",
+        "name": "Vibrato Rate",
         "short_name": "VbRt",
         "type": "float",
         "min": 0,
@@ -200,7 +200,7 @@
       },
       {
         "key": "pressure_routing",
-        "name": "Pressure",
+        "name": "Pressure Target",
         "short_name": "Prs",
         "type": "enum",
         "options": [
@@ -224,7 +224,7 @@
       },
       {
         "key": "pressure_depth",
-        "name": "Prs Depth",
+        "name": "Pressure Depth",
         "short_name": "Dpth",
         "type": "float",
         "min": 0,
@@ -300,7 +300,11 @@
           },
           {
             "level": "motion",
-            "label": "Vibrato & Delay"
+            "label": "Vibrato"
+          },
+          {
+            "level": "echo",
+            "label": "Delay"
           },
           {
             "level": "expression",
@@ -351,12 +355,10 @@
         ]
       },
       "motion": {
-        "label": "Vibrato & Delay",
+        "label": "Vibrato",
         "knobs": [
           "vibrato",
-          "vibrato_rate",
-          "delay",
-          "delay_rate"
+          "vibrato_rate"
         ],
         "params": [
           {
@@ -364,7 +366,16 @@
           },
           {
             "key": "vibrato_rate"
-          },
+          }
+        ]
+      },
+      "echo": {
+        "label": "Delay",
+        "knobs": [
+          "delay",
+          "delay_rate"
+        ],
+        "params": [
           {
             "key": "delay"
           },

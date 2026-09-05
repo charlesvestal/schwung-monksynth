@@ -688,7 +688,7 @@ static const char CHAIN_PARAMS_JSON[] =
   * read it off the page, which spent one of eight cells on a 17x15 head nobody
   * could read. It is declared here so it has metadata, and reaches the widget
   * through `extra_keys` on `vowel` instead. */
- "{\"key\":\"face\",\"name\":\"Who\",\"short_name\":\"Who\",\"type\":\"int\","
+ "{\"key\":\"face\",\"name\":\"Character\",\"short_name\":\"Char\",\"type\":\"int\","
   "\"min\":0,\"max\":11,\"step\":1,\"default\":0,\"access\":\"read\","
   "\"show_value\":false},"
  /* LIVE: pad pressure drives this past whatever the knob says, so the host
@@ -719,7 +719,7 @@ static const char CHAIN_PARAMS_JSON[] =
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.8},"
  "{\"key\":\"level\",\"name\":\"Level\",\"short_name\":\"Lvl\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":1},"
- "{\"key\":\"vibrato_rate\",\"name\":\"Vib Rate\",\"short_name\":\"VbRt\",\"type\":\"float\","
+ "{\"key\":\"vibrato_rate\",\"name\":\"Vibrato Rate\",\"short_name\":\"VbRt\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"
  "{\"key\":\"attack\",\"name\":\"Attack\",\"short_name\":\"Atk\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0},"
@@ -739,7 +739,7 @@ static const char CHAIN_PARAMS_JSON[] =
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"
  /* Four modes, and the DEFAULT one sweeps the VOWEL, not the pitch — see
   * route_expression. Move has no wheels, so pad pressure is the source. */
- "{\"key\":\"pressure_routing\",\"name\":\"Pressure\",\"short_name\":\"Prs\",\"type\":\"enum\","
+ "{\"key\":\"pressure_routing\",\"name\":\"Pressure Target\",\"short_name\":\"Prs\",\"type\":\"enum\","
   "\"options\":[\"Vowel\",\"Pitch\",\"Both\",\"Both Inv\"],\"default\":0},"
  "{\"key\":\"bend_range\",\"name\":\"Bend Range\",\"short_name\":\"Bend\",\"type\":\"float\","
   "\"min\":0,\"max\":12,\"step\":0.5,\"default\":2,\"unit\":\"st\"},"
@@ -754,7 +754,7 @@ static const char CHAIN_PARAMS_JSON[] =
   * place. At 0.5 a hard press moves half the range from wherever the knob is,
   * so both controls are always live.
   */
- "{\"key\":\"pressure_depth\",\"name\":\"Prs Depth\",\"short_name\":\"Dpth\",\"type\":\"float\","
+ "{\"key\":\"pressure_depth\",\"name\":\"Pressure Depth\",\"short_name\":\"Dpth\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"
  /*
   * THE FACE IS THE PRESET BROWSER.
@@ -789,7 +789,8 @@ static const char UI_HIERARCHY_JSON[] =
      "{\"key\":\"delay\"},{\"key\":\"level\"},"
      "{\"level\":\"envelope\",\"label\":\"Envelope\"},"
      "{\"level\":\"unison\",\"label\":\"Unison\"},"
-     "{\"level\":\"motion\",\"label\":\"Vibrato & Delay\"},"
+     "{\"level\":\"motion\",\"label\":\"Vibrato\"},"
+     "{\"level\":\"echo\",\"label\":\"Delay\"},"
      "{\"level\":\"expression\",\"label\":\"Expression\"}"
    "]"
   "},"
@@ -799,9 +800,21 @@ static const char UI_HIERARCHY_JSON[] =
   "\"unison\":{\"label\":\"Unison\","
    "\"knobs\":[\"unison\",\"unison_detune\",\"unison_spread\"],"
    "\"params\":[{\"key\":\"unison\"},{\"key\":\"unison_detune\"},{\"key\":\"unison_spread\"}]},"
-  "\"motion\":{\"label\":\"Vibrato & Delay\","
-   "\"knobs\":[\"vibrato\",\"vibrato_rate\",\"delay\",\"delay_rate\"],"
-   "\"params\":[{\"key\":\"vibrato\"},{\"key\":\"vibrato_rate\"},{\"key\":\"delay\"},{\"key\":\"delay_rate\"}]},"
+  /*
+   * TWO LEVELS, NOT ONE "Vibrato and Delay".
+   *
+   * The combined name is the problem from both ends: "&" is a coin toss for a
+   * speech synth, and spelling it "and" truncates in the header to "VIBRATO
+   * AND", which reads as an unfinished phrase rather than a page. Two short
+   * names are complete in the header and complete out loud, and each page is
+   * about one thing.
+   */
+  "\"motion\":{\"label\":\"Vibrato\","
+   "\"knobs\":[\"vibrato\",\"vibrato_rate\"],"
+   "\"params\":[{\"key\":\"vibrato\"},{\"key\":\"vibrato_rate\"}]},"
+  "\"echo\":{\"label\":\"Delay\","
+   "\"knobs\":[\"delay\",\"delay_rate\"],"
+   "\"params\":[{\"key\":\"delay\"},{\"key\":\"delay_rate\"}]},"
   "\"expression\":{\"label\":\"Expression\","
    "\"knobs\":[\"pressure_routing\",\"pressure_depth\",\"bend_range\"],"
    "\"params\":[{\"key\":\"pressure_routing\"},{\"key\":\"pressure_depth\"},{\"key\":\"bend_range\"}]}"
