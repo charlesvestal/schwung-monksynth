@@ -603,17 +603,27 @@ for (let i = 0; i < FACES.length; i++) FACE_BY_ID[FACES[i].id] = FACES[i];
 /* --------------------------------------------------------------- the mouth */
 
 /*
- * The vowel is QUANTISED to 24 steps before it reaches a shape, and that is
- * deliberate — ported from CharacterView.vowelFrameCount.
+ * The vowel reaches the mouth SMOOTHLY.
  *
- * The original Delay Lama animated a sprite sheet, and the iOS port's own doc
- * comment records that an early continuous version "read as slicker and less
- * alive". So the SHAPE stays a smooth function of vowel and its INPUT is
- * stepped. Do not smooth this out; the stepping is the charm.
+ * It was quantised to 24 steps, ported from CharacterView.vowelFrameCount --
+ * the original Delay Lama animated a sprite sheet, and the iOS port records
+ * that a continuous version "read as slicker and less alive".
+ *
+ * That reasoning does not survive the move to this screen. On a phone the mouth
+ * is a couple of hundred pixels tall and 24 frames is visible animation; in a
+ * 17x15 knob cell the aperture is a handful of pixels, so the same 24 steps are
+ * most of its travel and the thing simply jumps. Judged on hardware as
+ * stair-stepping, which is exactly what it is here.
+ *
+ * Kept as a function rather than deleted at the call sites: it is the one knob
+ * to turn if the stepped look is ever wanted at a larger size.
  */
+const VOWEL_STEPS = 0;      /* 0 = continuous; 24 = the original sprite cadence */
+
 function quantisedVowel(v) {
     const c = v < 0 ? 0 : (v > 1 ? 1 : v);
-    const steps = 23;                       /* vowelFrameCount - 1 */
+    if (VOWEL_STEPS < 2) return c;
+    const steps = VOWEL_STEPS - 1;
     return Math.round(c * steps) / steps;
 }
 
@@ -869,6 +879,65 @@ globalThis.canvas_overlay = {
      * need a per-frame read. It is named here rather than faked.
      * ====================================================================== */
 
+
+    /* ======================================================================
+     * SURFACE 5 — THE FACE PAGE
+     *
+     * A page of its own in the jog rotation, not a view you dive into. The
+     * host draws the header (including the touch strip while a knob is held)
+     * and the footer; this gets the band between them and nothing else, frame
+     * scoped, so it cannot paint chrome and does not have to draw any.
+     *
+     * IT ANIMATES BECAUSE IT IS A PAGE. The host redraws every tick and the
+     * page carries the level's own knobs, so `values` is the same cache the
+     * grid renders from -- already fresh, at no extra read. The vowel here is
+     * the live one, the character comes from `face` (declared as an extra key
+     * on the vowel widget), and the blink comes from the clock.
+     *
+     * Still NO READS: this is a draw path like any other.
+     * ====================================================================== */
+    drawPage(ctx, { values, nowMs }) {
+        const c = norm(ctx);
+        const w = c.width, h = c.height;
+        if (w < 24 || h < 16) return;
+
+        const face = faceFrom(values ? values.face : null);
+        const rawV = values ? Number(values.vowel) : NaN;
+        const v = Number.isFinite(rawV) ? rawV : 0.5;
+
+        /* No answer, no picture -- the same rule the cells and the card obey. */
+        if (!face) {
+            const msg = "loading character...";
+            c.print(Math.max(0, (w - c.textWidth(msg)) >> 1), (h >> 1) - 3, msg, 1);
+            return;
+        }
+
+        /*
+         * The face gets the height; the reading sits beside it only if there is
+         * room left over. Sized from the band rather than from constants: this
+         * is the same drawing that runs in a 17x15 cell, and the band is
+         * whatever the host has after its own chrome.
+         */
+        /*
+         * The face takes the band's HEIGHT (it is the binding axis at every
+         * size this page is ever given), sits at the left, and the two readings
+         * are right-aligned against the band's own edge. Right-aligned rather
+         * than placed just past the face: the face's width follows the band
+         * height, so a fixed offset drifts as soon as anything about the chrome
+         * changes.
+         */
+        const label = vowelName(v);
+        const nm = String(face.name);
+        const faceW = Math.min(w, h);
+
+        paintFace(subFrame(c, 0, 0, faceW, h), face, face.cropFull, v, 0, nowMs || 0);
+
+        const lw = c.textWidth(label);
+        const nw = c.textWidth(nm);
+        const room = w - faceW - 4;
+        if (lw <= room) c.print(w - lw, 2, label, 1);
+        if (nw <= room) c.print(w - nw, h - 8, nm, 1);
+    },
     onOpen(ctx) { refreshFromDevice(ctx); },
 
     onMidi(ctx, { data }) {

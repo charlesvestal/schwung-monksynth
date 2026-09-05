@@ -227,6 +227,7 @@
         "short_name": "Face",
         "type": "canvas",
         "canvas_script": "canvas.js",
+        "as_page": true,
         "show_value": false
       }
     ]

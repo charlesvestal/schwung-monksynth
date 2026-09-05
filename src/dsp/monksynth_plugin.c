@@ -234,6 +234,8 @@ typedef struct {
     int     held_count;
 
     float vowel;           /* the KNOB's vowel; pressure drives the engine past it */
+    float vowel_cur;       /* slewed toward `vowel` -- see slew_block */
+    int   vowel_slewing;   /* 0 while PRESSURE owns the vowel, so the two do not fight */
     float expr;            /* last routed expression value, 0..1 */
 } monk_inst_t;
 
@@ -294,6 +296,34 @@ static void apply_all(monk_inst_t *in, int snap) {
 
 /* Walk every slewed parameter one block closer to its target. */
 static void slew_block(monk_inst_t *in) {
+    /*
+     * VOWEL IS SLEWED TOO, and it lives outside the p[] table so it needed
+     * saying twice. Missing it is why the first smoothing pass fixed Head Size
+     * and Breath and left the one knob anybody actually performs with stepping.
+     *
+     * The engine has a ramp of its own -- ten ticks of 10 ms -- but it is
+     * RESTARTED by every set_vowel, so a knob sending one discrete step per
+     * detent produces a staircase of restarts rather than a glide. Slewing here
+     * at block rate (~344 Hz against the ramp's 100 Hz) means what the engine
+     * is handed already moves smoothly.
+     *
+     * Skipped entirely while pressure is driving: aftertouch writes the engine's
+     * vowel directly, and slewing the knob's value on top would drag it back
+     * toward where the knob was left, which reads as the pad fighting you.
+     */
+    if (in->vowel_slewing) {
+        const float d = in->vowel - in->vowel_cur;
+        if (d > -SLEW_SNAP && d < SLEW_SNAP) {
+            if (in->vowel_cur != in->vowel) {
+                in->vowel_cur = in->vowel;
+                monk_synth_set_vowel(in->engine, in->vowel_cur);
+            }
+            in->vowel_slewing = 0;
+        } else {
+            in->vowel_cur += d * SLEW_COEF;
+            monk_synth_set_vowel(in->engine, in->vowel_cur);
+        }
+    }
     for (int i = 0; i < P_COUNT; i++) {
         if (!PARAM_SMOOTH[i]) continue;
         const float t = in->p[i], c = in->cur[i];
@@ -327,6 +357,8 @@ static void *v2_create_instance(const char *dir, const char *cfg) {
     in->bend_range = 2.0f;
     in->expr = 0.0f;
     in->vowel = 0.5f;
+    in->vowel_cur = 0.5f;
+    in->vowel_slewing = 0;
     /* Vowel is not in the character table (see CHARACTERS), so seed upstream's
      * own default for it here rather than leaving the mouth shut at 0. */
     monk_synth_set_vowel(in->engine, 0.5f);
@@ -349,6 +381,8 @@ static void v2_destroy_instance(void *instance) {
 static void route_expression(monk_inst_t *in, float x) {
     x = clamp01(x);
     in->expr = x;
+    /* Pressure now owns the vowel; stop the knob slew chasing it. */
+    in->vowel_slewing = 0;
     switch (in->route) {
     case ROUTE_VOWEL:
         monk_synth_set_vowel(in->engine, x);
@@ -499,9 +533,9 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     }
 
     if (strcmp(key, "vowel") == 0) {
-        float v = clamp01((float)atof(val));
-        in->vowel = v;
-        monk_synth_set_vowel(in->engine, v);
+        /* Set the TARGET; slew_block walks the engine there. */
+        in->vowel = clamp01((float)atof(val));
+        in->vowel_slewing = 1;
         return;
     }
 
@@ -566,7 +600,10 @@ static void restore_state(monk_inst_t *in, const char *json) {
         apply_param(in, i, 1);
     }
     if (json_num(json, "vowel", &f)) {
+        /* A restore SNAPS, like every other value here. */
         in->vowel = clamp01(f);
+        in->vowel_cur = in->vowel;
+        in->vowel_slewing = 0;
         monk_synth_set_vowel(in->engine, in->vowel);
     }
     if (json_num(json, "pressure_routing", &f)) {
@@ -653,8 +690,13 @@ static const char CHAIN_PARAMS_JSON[] =
   "\"options\":[\"Vowel\",\"Both\",\"Both Inv\",\"Pitch\"],\"default\":0},"
  "{\"key\":\"bend_range\",\"name\":\"Bend Range\",\"short_name\":\"Bend\",\"type\":\"float\","
   "\"min\":0,\"max\":12,\"step\":0.5,\"default\":2,\"unit\":\"st\"},"
+ /* A PAGE, not a cell you dive into. `as_page` puts it in the level's jog
+  * rotation carrying the level's own knobs, so the face is one page-turn from
+  * Main, the eight encoders do there exactly what they do on Main, and it
+  * animates because the host redraws it every tick. The header and footer are
+  * the host's. */
  "{\"key\":\"big_face\",\"name\":\"Face\",\"short_name\":\"Face\",\"type\":\"canvas\","
-  "\"canvas_script\":\"canvas.js\",\"show_value\":false}"
+  "\"canvas_script\":\"canvas.js\",\"as_page\":true,\"show_value\":false}"
 "]";
 
 static const char UI_HIERARCHY_JSON[] =
