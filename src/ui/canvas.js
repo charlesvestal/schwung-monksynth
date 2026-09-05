@@ -167,6 +167,32 @@ function ellipse(u, fcx, fcy, frw, frh, fill, color) {
     }
 }
 
+/*
+ * AN OPAQUE ELLIPSE: cleared inside, then outlined.
+ *
+ * 1-bit outline art has no depth. A muzzle drawn over a head is two outlines
+ * crossing, and the head's arc runs straight through the snout -- which reads
+ * as a transparent shape rather than one in front. Blanking the interior first
+ * gives the near shape something to occlude WITH, which is the only kind of
+ * depth this display has.
+ *
+ * Order therefore matters: draw back to front, and every occluder through here.
+ */
+function ellipseSolid(u, cx, cy, rw, rh) {
+    ellipse(u, cx, cy, rw, rh, true, 0);
+    ellipse(u, cx, cy, rw, rh, false, 1);
+}
+
+/* An opaque disc, for a head sitting in front of ears, hair or a hat. */
+function circleSolid(u, fcx, fcy, fr) {
+    const cx = Math.round(u.x(fcx)), cy = Math.round(u.y(fcy));
+    const r = Math.round(fr * u.s);
+    u.ctx.fillCircle
+        ? u.ctx.fillCircle(cx, cy, r, 0)
+        : ellipse(u, fcx, fcy, fr, fr, true, 0);
+    u.ctx.drawCircle(cx, cy, r, 1);
+}
+
 /* A straight line in unit coords. */
 function uline(u, x0, y0, x1, y1, color) {
     u.ctx.line(Math.round(u.x(x0)), Math.round(u.y(y0)),
@@ -293,7 +319,7 @@ const FACES = [
         /* Ears first, so the head circle overlaps their inner half and leaves
          * the outer crescent — exactly the layering the Swift relies on. */
         if (d >= 1) for (const cx of [0.337, 0.663]) ellipse(u, cx, 0.318, 0.0225, 0.038, false, 1);
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.30)), Math.round(0.17 * u.s), 1);
+        circleSolid(u, 0.5, 0.30, 0.17);
         if (d < 2) return;
         /* Neck, then the robe: shoulders, hem, and the drape line whose upper
          * side is the bare shoulder. */
@@ -346,18 +372,25 @@ const FACES = [
     head(u, d) {
         /* Ears and horn BEFORE the head, same reason as the monk's ears. The
          * horn is the character; it is drawn at every detail level. */
-        for (const s of [-1, 1]) {
-            const cx = 0.5 + s * 0.1295;
-            tri(u, cx - 0.05, 0.198, cx + 0.05, 0.198, cx, -0.042);
+        /*
+         * THE HORN MUST NOT LOOK LIKE A THIRD EAR. At page size the original
+         * geometry gave three triangles of similar height and width, which read
+         * as a crown of spikes on something alien rather than as a unicorn. The
+         * horn is narrower and taller than both ears; the ears are shorter and
+         * set wider, so the silhouette says horse-with-a-horn at a glance.
+         */
+        for (const sd of [-1, 1]) {
+            const cx = 0.5 + sd * 0.150;
+            tri(u, cx - 0.055, 0.205, cx + 0.055, 0.205, cx + sd * 0.02, 0.045);
         }
-        tri(u, 0.466, 0.156, 0.534, 0.156, 0.518, -0.135);
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.30)), Math.round(0.185 * u.s), 1);
+        tri(u, 0.474, 0.170, 0.526, 0.170, 0.505, -0.115);
+        circleSolid(u, 0.5, 0.30, 0.185);
         /* Spiral hints up the horn — three short diagonals, large sizes only. */
         if (d >= 2) for (const t of [0.2, 0.42, 0.64]) {
             const y = 0.156 + (-0.135 - 0.156) * t, w = 0.034 * (1 - t);
             uline(u, 0.5 - w, y, 0.5 + w + 0.01, y - 0.012);
         }
-        ellipse(u, 0.5, 0.494, 0.135, 0.150, false, 1);   /* muzzle */
+        ellipseSolid(u, 0.5, 0.494, 0.135, 0.150);       /* muzzle */
         if (d >= 1) for (const nx of [0.468, 0.532]) ellipse(u, nx, 0.520, 0.011, 0.011, true, 1);
         if (d < 2) return;
         /* The mane, three strands down the LEFT side only. */
@@ -378,13 +411,19 @@ const FACES = [
     /* The head-to-body ratio IS the identity: r 0.115 against the monk's 0.17. */
     anchors: [[0.10,0.16],[0.16,0.20],[0.22,0.15],[0.26,0.10],[0.30,0.06]],
     mc: [0.5,0.255], mbf: 0.30,
-    crop: [0.24,0.03,0.76,0.35], cropFull: [0.02,0.02,0.98,1.00],
+    crop: [0.23,0.03,0.77,0.34], cropFull: [0.02,0.02,0.98,1.00],
     head(u, d) {
-        for (const cx of [0.3275, 0.6725]) {           /* pigtail buns */
-            ellipse(u, cx, 0.19, 0.0713, 0.0713, false, 1);
-            if (d >= 2) uline(u, cx, 0.19 + 0.0713 * 0.6, cx - (cx < 0.5 ? 0.02 : -0.02), 0.19 + 0.0713 * 2.0);
+        /* Bigger, and clear of the head so the opaque head does not eat a
+         * sliver and leave them looking like parentheses. */
+        /* They must OVERLAP the head. Sitting just clear of it, the opaque head
+         * erased nothing and they read as two rings floating either side rather
+         * than as hair attached to a girl. Tucked in far enough that the head
+         * eats their inner third, which is what makes them buns. */
+        for (const cx of [0.345, 0.655]) {             /* pigtail buns */
+            ellipse(u, cx, 0.200, 0.085, 0.085, false, 1);
+            if (d >= 2) uline(u, cx, 0.200 + 0.085 * 0.6, cx - (cx < 0.5 ? 0.02 : -0.02), 0.200 + 0.085 * 2.0);
         }
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.20)), Math.round(0.115 * u.s), 1);
+        circleSolid(u, 0.5, 0.20, 0.115);
         /* Bangs: the arc across the brow plus the crown peak. */
         quad(u, 0.4004, 0.1425, 0.5, 0.163, 0.5996, 0.1425);
         if (d >= 1) {
@@ -408,7 +447,7 @@ const FACES = [
     crop: [0.25,0.10,0.75,0.68], cropFull: [0.02,0.08,0.98,1.00],
     head(u, d) {
         if (d >= 1) for (const cx of [0.3383, 0.6617]) ellipse(u, cx, 0.30, 0.021, 0.035, false, 1);
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.30)), Math.round(0.165 * u.s), 1);
+        circleSolid(u, 0.5, 0.30, 0.165);
         /* Side tufts, which bulge PAST the silhouette — that overhang is what
          * makes the bald crown read as bald rather than as a plain circle. */
         for (const s of [-1, 1]) {
@@ -447,8 +486,8 @@ const FACES = [
             tri(u, 0.5 + s * 0.0684 - s * 0.012, 0.11, 0.5 + s * 0.0684 + s * 0.012, 0.11,
                    0.5 + s * 0.1254, 0.004);
         }
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.27)), Math.round(0.19 * u.s), 1);
-        ellipse(u, 0.5, 0.540, 0.19, 0.15, false, 1);    /* the big muzzle */
+        circleSolid(u, 0.5, 0.27, 0.19);
+        ellipseSolid(u, 0.5, 0.540, 0.19, 0.15);         /* the big muzzle */
         if (d >= 1) for (const nx of [0.425, 0.575]) ellipse(u, nx, 0.522, 0.018, 0.013, true, 1);
         /* The dark patch over one eye, as an outline — a filled patch at 1 bit
          * would swallow the eye it is supposed to sit around. */
@@ -476,8 +515,8 @@ const FACES = [
             quad(u, rx, 0.272, 0.5 + s * 0.26, 0.42, 0.5 + s * 0.198, 0.587);
             quad(u, 0.5 + s * 0.198, 0.587, 0.5 + s * 0.135, 0.44, rx, 0.30);
         }
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.30)), Math.round(0.185 * u.s), 1);
-        ellipse(u, 0.5, 0.522, 0.15, 0.13, false, 1);            /* snout */
+        circleSolid(u, 0.5, 0.30, 0.185);
+        ellipseSolid(u, 0.5, 0.522, 0.15, 0.13);                 /* snout */
         ellipse(u, 0.5, 0.522 - 0.13 * 0.28, 0.035, 0.026, true, 1); /* nose */
         if (d < 2) return;
         quad(u, 0.24, 0.62, 0.14, 0.80, 0.06, 0.99);
@@ -513,10 +552,11 @@ const FACES = [
     mc: [0.5,0.44], mbf: 0.25,
     crop: [0.23,0.09,0.77,0.54], cropFull: [0.02,0.08,0.98,1.00],
     head(u, d) {
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.34)), Math.round(0.165 * u.s), 1);
+        circleSolid(u, 0.5, 0.34, 0.165);
         /* The helmet is the character. Dome then brim, brim last so its flare
-         * cuts across the dome the way the real silhouette does. */
-        ellipse(u, 0.5, 0.206, 0.175, 0.0809, false, 1);
+         * cuts across the dome the way the real silhouette does. Both opaque,
+         * or the head's arc runs straight through the hat. */
+        ellipseSolid(u, 0.5, 0.206, 0.175, 0.0809);
         ellipse(u, 0.5, 0.287, 0.223, 0.0297, true, 1);
         if (d >= 1) ellipse(u, 0.5, 0.129, 0.018, 0.018, true, 1);      /* knob */
         if (d >= 2) ellipse(u, 0.5, 0.206, 0.045, 0.030, false, 0);     /* badge */
@@ -539,12 +579,17 @@ const FACES = [
     id: "punk", name: "Punk",
     anchors: [[0.18,0.12],[0.28,0.10],[0.36,0.08],[0.42,0.14],[0.46,0.20]],
     mc: [0.5,0.42], mbf: 0.24,
-    crop: [0.30,-0.01,0.70,0.52], cropFull: [0.02,-0.01,0.98,1.00],
+    crop: [0.30,-0.05,0.70,0.52], cropFull: [0.02,-0.05,0.98,1.00],
     head(u, d) {
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.32)), Math.round(0.15 * u.s), 1);
-        /* Five mohawk spikes — the dominant cue, so never gated on detail. */
-        const spikes = [[0.42,0.14],[0.46,0.08],[0.50,0.02],[0.54,0.08],[0.58,0.14]];
-        for (const sp of spikes) tri(u, sp[0] - 0.02, 0.1925, sp[0] + 0.02, 0.1925, sp[0], sp[1]);
+        /* Spikes first, then an opaque head over their roots. */
+        /* Taller and wider than the rig's own numbers: at page size the
+         * original spikes were a wisp above a blob, and the mohawk IS the
+         * character. Drawn before the head so it occludes their roots. */
+        const punkSpikes = [[0.395,0.115],[0.448,0.035],[0.500,-0.030],[0.552,0.035],[0.605,0.115]];
+        for (const sp of punkSpikes) tri(u, sp[0] - 0.032, 0.215, sp[0] + 0.032, 0.215, sp[0], sp[1]);
+        circleSolid(u, 0.5, 0.335, 0.145);
+        /* (the spikes are drawn above, before the head, so it occludes their
+         * roots -- the dominant cue, never gated on detail) */
         if (d >= 2) {
             ellipse(u, 0.6275, 0.3725, 0.02, 0.02, false, 1);   /* safety pin */
             uline(u, 0.425, 0.4475, 0.425, 0.50); uline(u, 0.575, 0.4475, 0.575, 0.50);
@@ -577,17 +622,22 @@ const FACES = [
     id: "cat", name: "Cat",
     anchors: [[0.08,0.10],[0.14,0.14],[0.20,0.10],[0.24,0.06],[0.28,0.04]],
     mc: [0.5,0.345], mbf: 0.20,
-    crop: [0.28,-0.01,0.72,0.46], cropFull: [0.02,-0.01,0.98,1.00],
+    crop: [0.24,-0.05,0.76,0.46], cropFull: [0.02,-0.05,0.98,1.00],
     head(u, d) {
-        for (const s of [-1, 1]) {                       /* sharp triangle ears */
-            tri(u, 0.5 + s * 0.026, 0.28, 0.5 + s * 0.149, 0.28, 0.5 + s * 0.096, 0.0113);
+        /* Big triangular ears, set wide: at page size the original pair were
+         * small and sat inside the head's own outline, so the silhouette said
+         * nothing. They are the cat cue and now read from across the room. */
+        for (const sd of [-1, 1]) {
+            tri(u, 0.5 + sd * 0.040, 0.255, 0.5 + sd * 0.205, 0.255, 0.5 + sd * 0.135, -0.030);
         }
-        u.ctx.drawCircle(Math.round(u.x(0.5)), Math.round(u.y(0.28)), Math.round(0.175 * u.s), 1);
-        ellipse(u, 0.5, 0.376, 0.118, 0.083, false, 1);  /* muzzle */
+        circleSolid(u, 0.5, 0.28, 0.175);
+        ellipseSolid(u, 0.5, 0.376, 0.118, 0.083);       /* muzzle */
         tri(u, 0.472, 0.307, 0.528, 0.307, 0.5, 0.328);  /* nose */
         if (d >= 2) {
-            for (const s of [-1, 1]) for (const dy of [-0.02, 0, 0.02])
-                uline(u, 0.5 + s * 0.0875, 0.335 + dy * 0.5, 0.5 + s * 0.219, 0.335 + dy);
+            /* Two whiskers a side, not three: the third crossed the muzzle
+             * outline and turned the lower face into hatching. */
+            for (const sd of [-1, 1]) for (const dy of [-0.022, 0.022])
+                uline(u, 0.5 + sd * 0.115, 0.372 + dy * 0.5, 0.5 + sd * 0.245, 0.372 + dy);
             uline(u, 0.405, 0.455, 0.405, 0.60); uline(u, 0.595, 0.455, 0.595, 0.60);
             quad(u, 0.405, 0.60, 0.30, 0.78, 0.24, 0.99);
             quad(u, 0.595, 0.60, 0.70, 0.78, 0.76, 0.99);

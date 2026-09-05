@@ -830,8 +830,26 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
      * what the fullscreen face asks for so the mouth follows what is sounding
      * rather than where the knob was left.
      */
-    if (strcmp(key, "vowel:effective") == 0)
-        return snprintf(buf, buf_len, "%.4f", monk_synth_get_vowel(in->engine));
+    if (strcmp(key, "vowel:effective") == 0) {
+        /*
+         * THE ENGINE'S VOWEL IS ONLY LIVE WHILE SOMETHING IS SOUNDING.
+         *
+         * monk_synth_get_vowel returns voices[0].current_vowel, and that is
+         * advanced by apply_portamento -- which sits INSIDE the
+         * `if (v->active || env_stage == ENV_RELEASE)` branch of
+         * monk_voice_process. With no note playing it is frozen at whatever the
+         * last one ended on, so turning the vowel knob moved nothing on screen
+         * until you pressed a pad. Reported exactly that way from hardware.
+         *
+         * Silent, the honest answer is what WOULD be sung: the knob plus
+         * pressure, which is the value the engine will snap to the moment a
+         * note starts.
+         */
+        const float ev = monk_synth_is_active(in->engine)
+                       ? monk_synth_get_vowel(in->engine)
+                       : combined_vowel(in);
+        return snprintf(buf, buf_len, "%.4f", ev);
+    }
     if (strcmp(key, "amplitude") == 0)
         return snprintf(buf, buf_len, "%.4f", monk_synth_amplitude(in->engine));
     if (strcmp(key, "active") == 0)
