@@ -205,9 +205,9 @@
         "type": "enum",
         "options": [
           "Vowel",
+          "Pitch",
           "Both",
-          "Both Inv",
-          "Pitch"
+          "Both Inv"
         ],
         "default": 0
       },
@@ -239,6 +239,7 @@
         "type": "canvas",
         "canvas_script": "canvas.js",
         "as_page": true,
+        "preset_browser": true,
         "show_value": false
       }
     ]

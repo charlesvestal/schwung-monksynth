@@ -197,10 +197,17 @@ static const monk_character_t CHARACTERS[CHAR_COUNT] = {
  * USB-A still gets real 0xE0 bend, 0xD0 channel pressure and CC 1, which cost
  * a few lines here and would otherwise silently do nothing.
  */
-enum { ROUTE_VOWEL = 0, ROUTE_BOTH, ROUTE_BOTH_INV, ROUTE_PITCH, ROUTE_COUNT };
+/*
+ * Ordered the way you would reach for them: the two single destinations first,
+ * then the combinations. NOT upstream's order -- its enum is
+ * classic/both/bothInverted/pitch, which puts the second-simplest choice third.
+ * The stored value is an index, so this order is what a saved patch means;
+ * `Vowel` stays 0 either way, which is the default and every character's.
+ */
+enum { ROUTE_VOWEL = 0, ROUTE_PITCH, ROUTE_BOTH, ROUTE_BOTH_INV, ROUTE_COUNT };
 
 static const char *const ROUTE_NAMES[ROUTE_COUNT] = {
-    "Vowel", "Both", "Both Inv", "Pitch"
+    "Vowel", "Pitch", "Both", "Both Inv"
 };
 
 #define MAX_HELD 16
@@ -710,7 +717,7 @@ static const char CHAIN_PARAMS_JSON[] =
  /* Four modes, and the DEFAULT one sweeps the VOWEL, not the pitch — see
   * route_expression. Move has no wheels, so pad pressure is the source. */
  "{\"key\":\"pressure_routing\",\"name\":\"Pressure\",\"short_name\":\"Prs\",\"type\":\"enum\","
-  "\"options\":[\"Vowel\",\"Both\",\"Both Inv\",\"Pitch\"],\"default\":0},"
+  "\"options\":[\"Vowel\",\"Pitch\",\"Both\",\"Both Inv\"],\"default\":0},"
  "{\"key\":\"bend_range\",\"name\":\"Bend Range\",\"short_name\":\"Bend\",\"type\":\"float\","
   "\"min\":0,\"max\":12,\"step\":0.5,\"default\":2,\"unit\":\"st\"},"
  /*
@@ -726,13 +733,22 @@ static const char CHAIN_PARAMS_JSON[] =
   */
  "{\"key\":\"pressure_depth\",\"name\":\"Prs Depth\",\"short_name\":\"Dpth\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"
- /* A PAGE, not a cell you dive into. `as_page` puts it in the level's jog
-  * rotation carrying the level's own knobs, so the face is one page-turn from
-  * Main, the eight encoders do there exactly what they do on Main, and it
-  * animates because the host redraws it every tick. The header and footer are
-  * the host's. */
+ /*
+  * THE FACE IS THE PRESET BROWSER.
+  *
+  * `as_page` puts it in the level's jog rotation carrying the level's own
+  * knobs; `preset_browser` merges it WITH the level's browser rather than
+  * adding a page beside it. So it is the first page you land on, the jog steps
+  * through the twelve characters once entered, the eight encoders still edit
+  * the sound, and it animates because the host redraws it every tick.
+  *
+  * A face per character is a better picker than a row of text, and two pages --
+  * one showing the character and one naming it -- would be two doors onto the
+  * same choice. The header and footer stay the host's.
+  */
  "{\"key\":\"big_face\",\"name\":\"Face\",\"short_name\":\"Face\",\"type\":\"canvas\","
-  "\"canvas_script\":\"canvas.js\",\"as_page\":true,\"show_value\":false}"
+  "\"canvas_script\":\"canvas.js\",\"as_page\":true,\"preset_browser\":true,"
+  "\"show_value\":false}"
 "]";
 
 static const char UI_HIERARCHY_JSON[] =

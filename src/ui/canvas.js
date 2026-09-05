@@ -899,7 +899,7 @@ globalThis.canvas_overlay = {
      *
      * Still NO READS: this is a draw path like any other.
      * ====================================================================== */
-    drawPage(ctx, { values, nowMs }) {
+    drawPage(ctx, { values, nowMs, preset }) {
         const c = norm(ctx);
         const w = c.width, h = c.height;
         if (w < 24 || h < 16) return;
@@ -930,7 +930,15 @@ globalThis.canvas_overlay = {
          * changes.
          */
         const label = vowelName(v);
-        const nm = String(face.name);
+        /*
+         * The character's name comes from the BROWSER when this page is one --
+         * that is the authority on which preset is selected, and it is not a
+         * parameter anybody could read. `face.name` is the fallback for a
+         * plain custom page.
+         */
+        const nm = String((preset && preset.name) || face.name);
+        const pos = preset && preset.count
+            ? `${(preset.index || 0) + 1}/${preset.count}` : "";
 
         /*
          * The face gets everything the text does not need.
@@ -941,7 +949,7 @@ globalThis.canvas_overlay = {
          * without stretching, so a wide box simply lets a wide character grow;
          * a round head is still bound by the height and is unchanged.
          */
-        const textW = Math.max(c.textWidth(label), c.textWidth(nm));
+        const textW = Math.max(c.textWidth(label), c.textWidth(nm), c.textWidth(pos));
         const faceW = Math.max(16, w - textW - 6);
 
         /*
@@ -958,8 +966,10 @@ globalThis.canvas_overlay = {
 
         const lw = c.textWidth(label);
         const nw = c.textWidth(nm);
+        const pw = c.textWidth(pos);
         const room = w - faceW - 4;
         if (lw <= room) c.print(w - lw, 2, label, 1);
+        if (pos && pw <= room) c.print(w - pw, 12, pos, 1);
         if (nw <= room) c.print(w - nw, h - 8, nm, 1);
     },
     onOpen(ctx) { refreshFromDevice(ctx); },
