@@ -233,9 +233,10 @@ typedef struct {
     uint8_t held[MAX_HELD];
     int     held_count;
 
-    float vowel;           /* the KNOB's vowel; pressure drives the engine past it */
-    float vowel_cur;       /* slewed toward `vowel` -- see slew_block */
-    int   vowel_slewing;   /* 0 while PRESSURE owns the vowel, so the two do not fight */
+    float vowel;           /* the KNOB's vowel -- the resting position */
+    float vowel_cur;       /* slewed toward `vowel` */
+    float expr_cur;        /* slewed toward `expr` -- pressure, 0..1 */
+    float pressure_depth;  /* how far full pressure moves the vowel */
     float expr;            /* last routed expression value, 0..1 */
 } monk_inst_t;
 
@@ -294,6 +295,10 @@ static void apply_all(monk_inst_t *in, int snap) {
     for (int i = 0; i < P_COUNT; i++) apply_param(in, i, snap);
 }
 
+/* Defined below, beside route_expression, where the composition rule reads with
+ * the reason for it. */
+static float combined_vowel(const monk_inst_t *in);
+
 /* Walk every slewed parameter one block closer to its target. */
 static void slew_block(monk_inst_t *in) {
     /*
@@ -311,19 +316,25 @@ static void slew_block(monk_inst_t *in) {
      * vowel directly, and slewing the knob's value on top would drag it back
      * toward where the knob was left, which reads as the pad fighting you.
      */
-    if (in->vowel_slewing) {
-        const float d = in->vowel - in->vowel_cur;
-        if (d > -SLEW_SNAP && d < SLEW_SNAP) {
-            if (in->vowel_cur != in->vowel) {
-                in->vowel_cur = in->vowel;
-                monk_synth_set_vowel(in->engine, in->vowel_cur);
-            }
-            in->vowel_slewing = 0;
-        } else {
-            in->vowel_cur += d * SLEW_COEF;
-            monk_synth_set_vowel(in->engine, in->vowel_cur);
-        }
-    }
+    /*
+     * The knob and the pressure are slewed SEPARATELY and combined after, so
+     * neither can drag the other. Pressure is slewed too: aftertouch arrives in
+     * coarse 7-bit steps and a raw one is as steppy as a knob detent.
+     */
+    const float dv = in->vowel - in->vowel_cur;
+    if (dv > -SLEW_SNAP && dv < SLEW_SNAP) in->vowel_cur = in->vowel;
+    else in->vowel_cur += dv * SLEW_COEF;
+
+    const float de = in->expr - in->expr_cur;
+    if (de > -SLEW_SNAP && de < SLEW_SNAP) in->expr_cur = in->expr;
+    else in->expr_cur += de * SLEW_COEF;
+
+    monk_synth_set_vowel(in->engine, combined_vowel(in));
+
+    /* Pitch, for the modes that route pressure there. Applied every block for
+     * the same reason as the vowel: a 7-bit step is audible. */
+    if (in->route == ROUTE_BOTH || in->route == ROUTE_BOTH_INV || in->route == ROUTE_PITCH)
+        monk_synth_set_pitch_bend(in->engine, in->expr_cur * in->bend_range);
     for (int i = 0; i < P_COUNT; i++) {
         if (!PARAM_SMOOTH[i]) continue;
         const float t = in->p[i], c = in->cur[i];
@@ -358,7 +369,8 @@ static void *v2_create_instance(const char *dir, const char *cfg) {
     in->expr = 0.0f;
     in->vowel = 0.5f;
     in->vowel_cur = 0.5f;
-    in->vowel_slewing = 0;
+    in->expr_cur = 0.0f;
+    in->pressure_depth = 0.5f;
     /* Vowel is not in the character table (see CHARACTERS), so seed upstream's
      * own default for it here rather than leaving the mouth shut at 0. */
     monk_synth_set_vowel(in->engine, 0.5f);
@@ -377,28 +389,31 @@ static void v2_destroy_instance(void *instance) {
 
 /* -------------------------------------------------------------------- midi */
 
-/* Route one 0..1 expression value the way the current mode says. */
+/*
+ * Record pressure. It is APPLIED in slew_block, never here.
+ *
+ * PRESSURE MODIFIES THE KNOB; it does not replace it. It used to call
+ * set_vowel with an absolute position, which meant the knob and the pad were
+ * two things writing one value: press a pad and the knob's own slew was
+ * switched off so it would not fight back, then turn the knob and it took over
+ * again. Whichever moved last won, and both felt like they were being yanked.
+ *
+ * Composing them removes the conflict rather than arbitrating it -- the knob is
+ * the resting vowel, pressure is a departure from it, and one place computes
+ * the sum. Which is also what a player expects: set the vowel you want to sit
+ * on, then lean into a pad to push it.
+ */
 static void route_expression(monk_inst_t *in, float x) {
-    x = clamp01(x);
-    in->expr = x;
-    /* Pressure now owns the vowel; stop the knob slew chasing it. */
-    in->vowel_slewing = 0;
+    in->expr = clamp01(x);
+}
+
+/* The vowel actually sung: the knob, plus wherever pressure is pushing it. */
+static float combined_vowel(const monk_inst_t *in) {
+    const float d = in->expr_cur * in->pressure_depth;
     switch (in->route) {
-    case ROUTE_VOWEL:
-        monk_synth_set_vowel(in->engine, x);
-        break;
-    case ROUTE_BOTH:
-        monk_synth_set_pitch_bend(in->engine, x * in->bend_range);
-        monk_synth_set_vowel(in->engine, x);
-        break;
-    case ROUTE_BOTH_INV:
-        monk_synth_set_pitch_bend(in->engine, x * in->bend_range);
-        monk_synth_set_vowel(in->engine, 1.0f - x);
-        break;
-    case ROUTE_PITCH:
-        monk_synth_set_pitch_bend(in->engine, x * in->bend_range);
-        break;
-    default: break;
+    case ROUTE_BOTH_INV: return clamp01(in->vowel_cur - d);
+    case ROUTE_PITCH:    return in->vowel_cur;      /* pressure is all pitch */
+    default:             return clamp01(in->vowel_cur + d);
     }
 }
 
@@ -533,15 +548,19 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     }
 
     if (strcmp(key, "vowel") == 0) {
-        /* Set the TARGET; slew_block walks the engine there. */
+        /* Set the TARGET; slew_block walks the engine there and adds pressure. */
         in->vowel = clamp01((float)atof(val));
-        in->vowel_slewing = 1;
         return;
     }
 
     if (strcmp(key, "pressure_routing") == 0) {
         int r = atoi(val);
         if (r >= 0 && r < ROUTE_COUNT) in->route = r;
+        return;
+    }
+
+    if (strcmp(key, "pressure_depth") == 0) {
+        in->pressure_depth = clamp01((float)atof(val));
         return;
     }
 
@@ -603,9 +622,9 @@ static void restore_state(monk_inst_t *in, const char *json) {
         /* A restore SNAPS, like every other value here. */
         in->vowel = clamp01(f);
         in->vowel_cur = in->vowel;
-        in->vowel_slewing = 0;
         monk_synth_set_vowel(in->engine, in->vowel);
     }
+    if (json_num(json, "pressure_depth", &f)) in->pressure_depth = clamp01(f);
     if (json_num(json, "pressure_routing", &f)) {
         int r = (int)f;
         if (r >= 0 && r < ROUTE_COUNT) in->route = r;
@@ -694,6 +713,19 @@ static const char CHAIN_PARAMS_JSON[] =
   "\"options\":[\"Vowel\",\"Both\",\"Both Inv\",\"Pitch\"],\"default\":0},"
  "{\"key\":\"bend_range\",\"name\":\"Bend Range\",\"short_name\":\"Bend\",\"type\":\"float\","
   "\"min\":0,\"max\":12,\"step\":0.5,\"default\":2,\"unit\":\"st\"},"
+ /*
+  * How far full pressure moves the vowel FROM the knob. 0 means the pad does
+  * nothing and the knob is the whole story.
+  *
+  * DEFAULT 0.5, NOT 1, and that is the difference between composing the two and
+  * merely relocating the conflict. At 1 the sum saturates: knob at 0.3 plus
+  * full pressure clamps to 1.0, and so does knob at 0.0 -- so while you lean on
+  * a pad the knob does nothing at all, which is the same complaint in a new
+  * place. At 0.5 a hard press moves half the range from wherever the knob is,
+  * so both controls are always live.
+  */
+ "{\"key\":\"pressure_depth\",\"name\":\"Prs Depth\",\"short_name\":\"Dpth\",\"type\":\"float\","
+  "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"
  /* A PAGE, not a cell you dive into. `as_page` puts it in the level's jog
   * rotation carrying the level's own knobs, so the face is one page-turn from
   * Main, the eight encoders do there exactly what they do on Main, and it
@@ -732,8 +764,8 @@ static const char UI_HIERARCHY_JSON[] =
    "\"knobs\":[\"vibrato\",\"vibrato_rate\",\"delay\",\"delay_rate\"],"
    "\"params\":[{\"key\":\"vibrato\"},{\"key\":\"vibrato_rate\"},{\"key\":\"delay\"},{\"key\":\"delay_rate\"}]},"
   "\"expression\":{\"label\":\"Expression\","
-   "\"knobs\":[\"pressure_routing\",\"bend_range\"],"
-   "\"params\":[{\"key\":\"pressure_routing\"},{\"key\":\"bend_range\"}]}"
+   "\"knobs\":[\"pressure_routing\",\"pressure_depth\",\"bend_range\"],"
+   "\"params\":[{\"key\":\"pressure_routing\"},{\"key\":\"pressure_depth\"},{\"key\":\"bend_range\"}]}"
  "}"
 "}";
 
@@ -793,6 +825,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "pressure_routing_name") == 0)
         return serve(buf, buf_len, ROUTE_NAMES[in->route >= 0 && in->route < ROUTE_COUNT ? in->route : 0]);
     if (strcmp(key, "bend_range") == 0) return snprintf(buf, buf_len, "%.2f", in->bend_range);
+    if (strcmp(key, "pressure_depth") == 0) return snprintf(buf, buf_len, "%.4f", in->pressure_depth);
 
     for (int i = 0; i < P_COUNT; i++)
         if (strcmp(key, PARAM_KEYS[i]) == 0)
@@ -806,8 +839,10 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
      */
     if (strcmp(key, "state") == 0) {
         int n = snprintf(buf, buf_len, "{\"preset\":%d,\"vowel\":%.4f,"
-                         "\"pressure_routing\":%d,\"bend_range\":%.2f",
-                         in->preset, in->vowel, in->route, in->bend_range);
+                         "\"pressure_routing\":%d,\"bend_range\":%.2f,"
+                         "\"pressure_depth\":%.4f",
+                         in->preset, in->vowel, in->route, in->bend_range,
+                         in->pressure_depth);
         if (n < 0 || n >= buf_len) return -1;
         for (int i = 0; i < P_COUNT; i++) {
             const int m = snprintf(buf + n, (size_t)(buf_len - n), ",\"%s\":%.4f",

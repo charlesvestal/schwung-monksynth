@@ -223,6 +223,16 @@
         "unit": "st"
       },
       {
+        "key": "pressure_depth",
+        "name": "Prs Depth",
+        "short_name": "Dpth",
+        "type": "float",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
         "key": "big_face",
         "name": "Face",
         "short_name": "Face",
@@ -366,11 +376,15 @@
         "label": "Expression",
         "knobs": [
           "pressure_routing",
+          "pressure_depth",
           "bend_range"
         ],
         "params": [
           {
             "key": "pressure_routing"
+          },
+          {
+            "key": "pressure_depth"
           },
           {
             "key": "bend_range"

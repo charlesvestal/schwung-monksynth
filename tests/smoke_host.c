@@ -114,26 +114,80 @@ int main(int argc, char **argv) {
 
     ok(api->get_param(inst, "active", buf, sizeof(buf)) > 0 && atoi(buf) == 1, "reports active");
 
-    /* --- pressure sweeps the vowel, in the default routing --- */
-    api->set_param(inst, "vowel", "0.0");
+    /*
+     * --- pressure MODIFIES the knob, it does not replace it ---
+     *
+     * The two used to be rival writers of one value: pressure set the vowel
+     * absolutely and switched the knob's own slew off so it would not fight
+     * back; the knob then took it over again. Whichever moved last won, and on
+     * hardware both felt like they were being yanked. They compose now -- the
+     * knob is the resting vowel, pressure is a departure from it.
+     */
     api->set_param(inst, "pressure_routing", "0");     /* Vowel */
+    /* The DEFAULT depth, deliberately. At depth 1 the sum saturates -- knob
+     * 0.3 and knob 0.0 both clamp to 1.0 under full pressure -- so the knob
+     * does nothing while a pad is held, which is the original complaint in a
+     * new place. Testing at the shipped default is what caught that. */
+    api->set_param(inst, "pressure_depth", "0.5");
+
+    /* Settle the slew before each reading: the combined value is walked toward
+     * its target one block at a time, so an immediate read is mid-glide. */
+    #define SETTLE() do { for (int i = 0; i < 400; i++) api->render_block(inst, out, 128); } while (0)
+
+    api->set_param(inst, "vowel", "0.30");
+    const uint8_t at_off[3] = { 0xA0, 60, 0 };
+    api->on_midi(inst, at_off, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+    api->get_param(inst, "vowel:effective", buf, sizeof(buf));
+    double rest = atof(buf);
+    ok(fabs(rest - 0.30) < 0.02, "with no pressure the vowel rests where the KNOB is");
+
     const uint8_t at_hi[3] = { 0xA0, 60, 127 };
     api->on_midi(inst, at_hi, 3, MOVE_MIDI_SOURCE_INTERNAL);
-    api->render_block(inst, out, 128);
+    SETTLE();
     api->get_param(inst, "vowel:effective", buf, sizeof(buf));
-    double eff = atof(buf);
-    ok(eff > 0.5, "pad pressure drives the effective vowel");
+    double pressed = atof(buf);
+    ok(pressed > rest + 0.3, "pressure pushes it AWAY from the knob");
     api->get_param(inst, "vowel", buf, sizeof(buf));
-    ok(fabs(atof(buf) - 0.0) < 1e-6, "and leaves the knob's own value alone");
+    ok(fabs(atof(buf) - 0.30) < 1e-6, "and leaves the knob's own value alone");
 
-    /* Pressure for a note that is NOT on top must be ignored. */
-    const uint8_t other_on[3] = { 0x90, 48, 100 };
-    api->on_midi(inst, other_on, 3, MOVE_MIDI_SOURCE_INTERNAL);   /* 48 now on top */
-    api->set_param(inst, "vowel", "0.0");
-    const uint8_t at_lo[3] = { 0xA0, 60, 0 };                     /* pressure for 60 */
-    api->on_midi(inst, at_lo, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    /* THE CONFLICT: turning the knob while pressure is held must MOVE the
+     * result, not be overridden by the pressure that is still applied. */
+    api->set_param(inst, "vowel", "0.00");
+    SETTLE();
     api->get_param(inst, "vowel:effective", buf, sizeof(buf));
-    ok(atof(buf) > 0.5, "pressure from a non-top note is ignored");
+    double turned = atof(buf);
+    ok(turned < pressed - 0.2,
+       "turning the knob under held pressure still moves the vowel");
+
+    /* Releasing returns to whatever the knob now says. */
+    api->on_midi(inst, at_off, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+    api->get_param(inst, "vowel:effective", buf, sizeof(buf));
+    ok(fabs(atof(buf) - 0.00) < 0.02, "releasing returns to the knob");
+
+    /* Depth 0 means the pad does nothing to the vowel at all. */
+    api->set_param(inst, "pressure_depth", "0");
+    api->set_param(inst, "vowel", "0.40");
+    api->on_midi(inst, at_hi, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+    api->get_param(inst, "vowel:effective", buf, sizeof(buf));
+    ok(fabs(atof(buf) - 0.40) < 0.02, "at depth 0 pressure leaves the vowel alone");
+    api->set_param(inst, "pressure_depth", "0.5");
+    api->on_midi(inst, at_off, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+
+    /* And the saturating case is a REAL property worth pinning: at depth 1 the
+     * knob is swamped, which is why it is not the default. */
+    api->set_param(inst, "pressure_depth", "1");
+    api->set_param(inst, "vowel", "0.30");
+    api->on_midi(inst, at_hi, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+    api->get_param(inst, "vowel:effective", buf, sizeof(buf));
+    ok(atof(buf) > 0.98, "at depth 1 full pressure reaches the far end");
+    api->set_param(inst, "pressure_depth", "0.5");
+    api->on_midi(inst, at_off, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
 
     /* --- state round-trip --- */
     api->set_param(inst, "preset", "2");
