@@ -17,7 +17,10 @@ module = {
     "component_type": "sound_generator",
     "abbrev": "MK",
     "api_version": 2,
-    "dsp": "monksynth.so",
+    # Must be dsp.so for a sound_generator -- see scripts/build.sh. The chain
+    # host does not read this field at all on the synth path; it is here for
+    # module_manager.c's standalone load, and for the two to agree.
+    "dsp": "dsp.so",
     "capabilities": {
         "chainable": True,
         "audio_out": True,

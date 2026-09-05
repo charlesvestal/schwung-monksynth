@@ -27,6 +27,12 @@ cd "$REPO_ROOT"
 # ever package a manifest that matches the DSP it is packaging.
 python3 scripts/gen_module_json.py
 
+# CLEAN THE STAGING DIR, or a renamed artifact ships alongside its replacement.
+# That is not hypothetical: this module's binary was renamed monksynth.so ->
+# dsp.so and the next tarball contained BOTH, because packaging only ever
+# copied in and never removed. A stale .so in a module directory is worse than
+# clutter -- it is a second, older plugin sitting where a loader might find it.
+rm -rf dist/monksynth
 mkdir -p build dist/monksynth
 
 # -ffast-math is deliberately NOT used. The vendored engine's grain scheduler
@@ -42,7 +48,7 @@ ${CROSS_PREFIX}gcc -O3 -shared -fPIC \
     src/dsp/synth.c \
     src/dsp/voice.c \
     src/dsp/delay.c \
-    -o build/monksynth.so \
+    -o build/dsp.so \
     -Isrc/dsp \
     -lm
 
@@ -51,8 +57,21 @@ cp src/help.json    dist/monksynth/help.json
 cp src/ui/canvas.js dist/monksynth/canvas.js
 cp LICENSE          dist/monksynth/LICENSE
 cp NOTICE           dist/monksynth/NOTICE
-cp build/monksynth.so dist/monksynth/monksynth.so
-chmod +x dist/monksynth/monksynth.so
+# THE BINARY MUST BE CALLED dsp.so, and that is not a convention -- it is what
+# the chain host opens. It builds the path itself, and it uses a DIFFERENT rule
+# per component type:
+#
+#   sound_generator   <dir>/dsp.so          hardcoded  (chain_host.c:444)
+#   audio_fx          <dir>/<module-id>.so             (chain_host.c:272, 638)
+#   midi_fx           <dir>/dsp.so          hardcoded  (chain_midi.c:259)
+#
+# module.json's "dsp" field is NOT consulted on any of those paths -- only
+# module_manager.c reads it, for the standalone/menu load. So a sound generator
+# named after itself dlopens nothing, and the only symptom is one line in
+# debug.log: "cannot open shared object file". This module was built from an
+# audio-FX template and shipped as monksynth.so for exactly that reason.
+cp build/dsp.so dist/monksynth/dsp.so
+chmod +x dist/monksynth/dsp.so
 
 cd dist
 tar -czf monksynth-module.tar.gz monksynth/

@@ -7,7 +7,7 @@
   "component_type": "sound_generator",
   "abbrev": "MK",
   "api_version": 2,
-  "dsp": "monksynth.so",
+  "dsp": "dsp.so",
   "capabilities": {
     "chainable": true,
     "audio_out": true,
