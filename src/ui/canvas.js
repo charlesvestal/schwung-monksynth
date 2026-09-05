@@ -431,15 +431,21 @@ const FACES = [
     head(u, d) {
         /* Bigger, and clear of the head so the opaque head does not eat a
          * sliver and leave them looking like parentheses. */
-        /* They must OVERLAP the head. Sitting just clear of it, the opaque head
-         * erased nothing and they read as two rings floating either side rather
-         * than as hair attached to a girl. Tucked in far enough that the head
-         * eats their inner third, which is what makes them buns. */
-        for (const cx of [0.345, 0.655]) {             /* pigtail buns */
-            ellipse(u, cx, 0.200, 0.085, 0.085, false, 1);
-            if (d >= 2) uline(u, cx, 0.200 + 0.085 * 0.6, cx - (cx < 0.5 ? 0.02 : -0.02), 0.200 + 0.085 * 2.0);
-        }
+        /*
+         * HEAD FIRST, THEN THE BUNS ON TOP.
+         *
+         * Drawn underneath, the opaque head ate their inner halves and what
+         * survived were two thin crescents either side -- they read as
+         * parentheses around a face, not as hair. Drawn over it, each is a
+         * whole circle overlapping the head, which is what a bun looks like.
+         * Opaque, so the head's own outline does not run through them.
+         */
         circleSolid(u, 0.5, 0.20, 0.115);
+        for (const cx of [0.345, 0.655]) {
+            circleSolid(u, cx, 0.200, 0.085);
+            if (d >= 2) uline(u, cx, 0.200 + 0.085 * 0.9,
+                              cx - (cx < 0.5 ? 0.02 : -0.02), 0.200 + 0.085 * 2.0);
+        }
         /* Bangs: the arc across the brow plus the crown peak. */
         quad(u, 0.4004, 0.1425, 0.5, 0.163, 0.5996, 0.1425);
         if (d >= 1) {
@@ -527,8 +533,15 @@ const FACES = [
 },
 {
     id: "dog", name: "Dog",
+    /*
+     * mbf 0.30 with the widest anchors of any character made an aperture that
+     * reached the snout's own outline at EE -- the snout stopped reading as a
+     * nose and became a filled disc. 0.21 keeps the mouth comfortably inside it
+     * across the whole sweep while staying the biggest mouth in the set, which
+     * is right for a dog.
+     */
     anchors: [[0.20,0.14],[0.32,0.24],[0.44,0.34],[0.52,0.40],[0.58,0.44]],
-    mc: [0.5,0.56], mbf: 0.30,
+    mc: [0.5,0.565], mbf: 0.21,
     crop: [0.26,0.09,0.74,0.70], cropFull: [0.02,0.08,0.98,1.00],
     head(u, d) {
         /* Long drooping ears past the jawline — the dog cue, kept at detail 0. */
@@ -551,7 +564,10 @@ const FACES = [
     id: "ghost", name: "Ghost",
     anchors: [[0.30,0.30],[0.34,0.36],[0.36,0.38],[0.34,0.34],[0.30,0.28]],
     mc: [0.5,0.56], mbf: 0.22,
-    crop: [0.06,0.02,0.94,0.76], cropFull: [0.02,0.01,0.98,0.99],
+    /* The hem runs to fy 0.94. Cropping at 0.76 kept only the tops of the five
+     * scallops, which drew as a row of loose dots under the face -- read on
+     * hardware as "ghost is weird", and it was: a ghost with no hem. */
+    crop: [0.04,0.02,0.96,0.97], cropFull: [0.02,0.01,0.98,0.99],
     head(u, d) {
         /* One continuous sheet: no head/body split at all. */
         quad(u, 0.5, 0.04, 0.78, 0.02, 0.92, 0.20);
@@ -643,7 +659,7 @@ const FACES = [
 {
     id: "cat", name: "Cat",
     anchors: [[0.08,0.10],[0.14,0.14],[0.20,0.10],[0.24,0.06],[0.28,0.04]],
-    mc: [0.5,0.345], mbf: 0.20,
+    mc: [0.5,0.400], mbf: 0.20,
     crop: [0.24,-0.05,0.76,0.46], cropFull: [0.02,-0.05,0.98,1.00],
     head(u, d) {
         /* Big triangular ears, set wide: at page size the original pair were
@@ -653,8 +669,11 @@ const FACES = [
             tri(u, 0.5 + sd * 0.040, 0.255, 0.5 + sd * 0.205, 0.255, 0.5 + sd * 0.135, -0.030);
         }
         circleSolid(u, 0.5, 0.28, 0.175);
-        ellipseSolid(u, 0.5, 0.376, 0.118, 0.083);       /* muzzle */
-        tri(u, 0.472, 0.307, 0.528, 0.307, 0.5, 0.328);  /* nose */
+        /* Muzzle lower and wider, nose lifted onto the head above it: at page
+         * size the nose triangle, the mouth and the muzzle outline all landed
+         * within about four pixels and read as one scribble. */
+        ellipseSolid(u, 0.5, 0.392, 0.132, 0.092);       /* muzzle */
+        tri(u, 0.474, 0.300, 0.526, 0.300, 0.5, 0.322);  /* nose */
         if (d >= 2) {
             /* Two whiskers a side, not three: the third crossed the muzzle
              * outline and turned the lower face into hatching. */

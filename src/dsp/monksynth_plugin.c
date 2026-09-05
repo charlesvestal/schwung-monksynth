@@ -305,6 +305,7 @@ static void apply_all(monk_inst_t *in, int snap) {
 /* Defined below, beside route_expression, where the composition rule reads with
  * the reason for it. */
 static float combined_vowel(const monk_inst_t *in);
+static float combined_target(const monk_inst_t *in);
 
 /* Walk every slewed parameter one block closer to its target. */
 static void slew_block(monk_inst_t *in) {
@@ -415,13 +416,35 @@ static void route_expression(monk_inst_t *in, float x) {
 }
 
 /* The vowel actually sung: the knob, plus wherever pressure is pushing it. */
-static float combined_vowel(const monk_inst_t *in) {
-    const float d = in->expr_cur * in->pressure_depth;
+static float combine(const monk_inst_t *in, float vowel, float expr) {
+    const float d = expr * in->pressure_depth;
     switch (in->route) {
-    case ROUTE_BOTH_INV: return clamp01(in->vowel_cur - d);
-    case ROUTE_PITCH:    return in->vowel_cur;      /* pressure is all pitch */
-    default:             return clamp01(in->vowel_cur + d);
+    case ROUTE_BOTH_INV: return clamp01(vowel - d);
+    case ROUTE_PITCH:    return vowel;              /* pressure is all pitch */
+    default:             return clamp01(vowel + d);
     }
+}
+
+/* What is being sung right now: the SLEWED values, which is what the engine got. */
+static float combined_vowel(const monk_inst_t *in) {
+    return combine(in, in->vowel_cur, in->expr_cur);
+}
+
+/*
+ * What WOULD be sung: the targets, with no dependence on rendering.
+ *
+ * THE SHIM SKIPS render_block ENTIRELY ON A SILENT SLOT -- one probe frame in
+ * 172, so roughly four a second. The slew lives in render_block, so on a silent
+ * slot the slewed values crawl, and a reading derived from them appears frozen:
+ * the vowel only started tracking the knob after the first note had been
+ * played, which is exactly how it was reported.
+ *
+ * Silent, the targets are the honest answer anyway. They are also what the
+ * engine snaps to the instant a note begins, since the MIDI path assigns the
+ * vowel rather than ramping it.
+ */
+static float combined_target(const monk_inst_t *in) {
+    return combine(in, in->vowel, in->expr);
 }
 
 static void push_held(monk_inst_t *in, uint8_t note) {
@@ -847,7 +870,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
          */
         const float ev = monk_synth_is_active(in->engine)
                        ? monk_synth_get_vowel(in->engine)
-                       : combined_vowel(in);
+                       : combined_target(in);
         return snprintf(buf, buf_len, "%.4f", ev);
     }
     if (strcmp(key, "amplitude") == 0)

@@ -98,6 +98,34 @@ int main(int argc, char **argv) {
     api->get_param(inst, "vowel", buf, sizeof(buf));
     ok(fabs(atof(buf) - 0.9) < 1e-3, "loading a character leaves vowel alone");
 
+    /*
+     * --- THE VOWEL TRACKS ON A SILENT SLOT, WITH NO RENDERING AT ALL ---
+     *
+     * The shim skips render_block entirely on a silent slot (one probe frame in
+     * 172, ~4 a second). The parameter slew lives in render_block, so anything
+     * derived from the SLEWED values appears frozen while nothing is playing --
+     * which is how this shipped: the vowel only began following the knob after
+     * the first note had been played, and the face sat still until then.
+     *
+     * Rendered zero times here on purpose. That is the case the device actually
+     * presents, and the one the previous fix did not cover.
+     */
+    {
+        void *quiet = api->create_instance(".", NULL);
+        int tracked = 1;
+        for (int i = 0; i <= 4; i++) {
+            char sv[16];
+            const double want = i * 0.25;
+            snprintf(sv, sizeof(sv), "%.2f", want);
+            api->set_param(quiet, "vowel", sv);
+            /* NO render_block call. */
+            api->get_param(quiet, "vowel:effective", buf, sizeof(buf));
+            if (fabs(atof(buf) - want) > 1e-3) tracked = 0;
+        }
+        ok(tracked, "the vowel tracks the knob on a silent slot, unrendered");
+        api->destroy_instance(quiet);
+    }
+
     /* --- audio --- */
     int16_t out[128 * 2];
     memset(out, 0xAB, sizeof(out));
