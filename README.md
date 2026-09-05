@@ -53,10 +53,19 @@ and they were fixed upstream rather than worked around here:
   handed the page's value map, which is why `face` is pinned to the same page as
   `vowel` — with a test.
 
-**This module therefore needs a Schwung with `registerOverlayWidgets`.** On an
-older host the Vowel cell falls back to a built-in dial and the card loses its
-face; nothing else breaks. `tools/preview_faces.mjs` refuses to run against such
-a checkout and says so.
+### Host requirement
+
+**`min_host_version` is 1.2.1** — meaning "anything after v1.2.0", which is when
+every feature above landed. Both version comparators are numeric per component,
+so that floor admits 1.3.0 too; naming 1.3.0 instead would wrongly reject a
+1.2.1 host that carried them.
+
+On an older host the module still loads: the Vowel cell falls back to a built-in
+dial, the card loses its face, and there is no Face page. `tools/preview_faces.mjs`
+refuses to run against such a checkout and says why.
+
+The value is read from the **catalog entry**, not from `module.json` — it is
+recorded in both so they cannot drift.
 
 ## Build
 
