@@ -180,13 +180,9 @@ for (let i = 0; i < faces.length; i++) {
     const f = faces[i];
     const row = [];
 
-    /* The Who cell. */
-    {
-        const s = frameSurface(CELL_W, CELL_H);
-        drawThroughRegistry("custom:monkface", s.ctx,
-            { values: { face: f.id }, group: { keys: ["face"] }, nowMs: 0 });
-        row.push(s.fb);
-    }
+    /* No "Who" cell any more: a 17x15 head is an illegible blob, and it only
+     * existed to carry `face` to the cell beside it, which extra_keys now does.
+     * The whole face still appears -- on the card and full screen, below. */
     /* The Vowel cell, across the sweep. */
     for (const v of SWEEP) {
         const s = frameSurface(CELL_W, CELL_H);
@@ -243,7 +239,7 @@ for (let i = 0; i < faces.length; i++) {
  * not clip (a cell clips by design, the panel clipping means art is running
  * off the display), and every glyph must exist in the device atlas.
  */
-const MIN_LIT = [8, 4, 4, 4, 4, 4, 40, 40, 60];  /* per column, in row order */
+const MIN_LIT = [4, 4, 4, 4, 4, 40, 40, 60];  /* per column, in row order */
 const failures = [];
 for (let r = 0; r < rows.length; r++) {
     for (let c = 0; c < rows[r].length; c++) {

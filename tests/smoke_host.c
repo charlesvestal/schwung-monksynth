@@ -57,8 +57,10 @@ int main(int argc, char **argv) {
     int n = api->get_param(inst, "chain_params", buf, sizeof(buf));
     ok(n > 0, "serves chain_params");
     ok(n > 0 && buf[0] == '[' && buf[n - 1] == ']', "chain_params is a JSON array");
-    ok(strstr(buf, "custom:monkface") != NULL, "declares its custom widget kind");
+    ok(strstr(buf, "custom:monkmouth") != NULL, "declares its custom widget kind");
     ok(strstr(buf, "card_script") != NULL, "declares the vowel card");
+    ok(strstr(buf, "extra_keys") != NULL,
+       "the mouth widget names `face` as an off-page extra key");
 
     n = api->get_param(inst, "ui_hierarchy", buf, sizeof(buf));
     ok(n > 0 && strstr(buf, "list_param") != NULL, "root declares the preset browser");

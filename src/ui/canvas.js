@@ -2,7 +2,6 @@
  * MonkSynth — all three module-supplied draw surfaces, and the twelve faces
  * they share.
  *
- *   drawCell  "custom:monkface"  the whole face, in the Who cell
  *   drawCell  "custom:monkmouth" that character's mouth, in the Vowel cell
  *   vowel_card                    the face + vowel name, floating on a turn
  *   draw                          the fullscreen face, and the character picker
@@ -736,30 +735,72 @@ function paintFace(rawCtx, face, crop, vowel, amp, nowMs) {
  * rig rather than hand-tuned per face, so a new character needs no new number. */
 function mouthCrop(face) {
     /*
-     * Sized from the WIDEST anchor across the whole sweep, not from the current
-     * vowel — a crop that tracked the value would zoom as you turned, so the
-     * mouth would appear not to change at all.
+     * A crop shaped like the MOUTH, not a square.
      *
-     * The 1.25 margin was measured, not chosen: at the 1.9 this started at, a
-     * 17x15 cell gave the aperture about four pixels and the OO..EE morph moved
-     * it by one, which is indistinguishable from nothing. Tight enough that the
-     * mouth owns the cell, loose enough that a little of the surrounding muzzle
-     * or beard still clips in and it reads as a mouth in a face.
+     * Sized from the widest and tallest anchors across the whole sweep, so the
+     * crop never changes as you turn -- a crop that tracked the value would
+     * zoom with the mouth and the morph would appear not to happen at all.
+     *
+     * It matches the mouth's own ASPECT because unit() fits without stretching,
+     * by the shorter axis. A square crop around a wide, flat mouth therefore
+     * fitted by its unused height and threw away most of the cell: punk, pizza
+     * and cat drew three lit pixels at OO, which is not a picture. Matching the
+     * aspect lets whichever axis actually binds do the fitting.
+     *
+     * The 0.62 half-extent (a hair over half) leaves a pixel of air at the
+     * widest anchor so the mouth never touches the cell edge -- which is what
+     * made the previous version read as clipped by the header.
      */
-    const [w, h] = mouthShape(face, 1.0);
-    const rw = Math.max(w, h) * face.mbf * 1.25;
-    return [face.mc[0] - rw, face.mc[1] - rw, face.mc[0] + rw, face.mc[1] + rw];
+    let mw = 0, mh = 0;
+    for (const a of face.anchors) {
+        if (a[0] > mw) mw = a[0];
+        if (a[1] > mh) mh = a[1];
+    }
+    const rw = mw * face.mbf * 0.62;
+    const rh = mh * face.mbf * 0.62;
+    return [face.mc[0] - rw, face.mc[1] - rh, face.mc[0] + rw, face.mc[1] + rh];
+}
+
+/*
+ * READ THE DEVICE. Only ever called from onOpen / onMidi, which are EVENTS --
+ * never from draw or tick, where getParam is not on the context at all.
+ *
+ * A PLAIN FUNCTION, NOT A METHOD, and the method form was a real bug here. The
+ * host invokes a canvas hook UNBOUND -- `fn(canvasHookCtx(name), payload)` in
+ * invokeCanvasOverlayHook -- so `this` inside onOpen was undefined and
+ * `this._refresh(ctx)` threw a TypeError. That throw is ONE-STRIKE: the whole
+ * overlay is disabled for the session, so the device showed
+ * "onOpen error: TypeError" and the face never drew again.
+ *
+ * Note drawCell is the other way round -- registerOverlayWidgets BINDS it, so
+ * `this` works there. Two hooks on one object with different `this`, which is
+ * why the safe rule for an overlay is simply never to use `this` at all.
+ */
+function refreshFromDevice(ctx) {
+    const st = ctx.state || (ctx.state = {});
+    if (typeof ctx.getParam !== "function") return;
+    const id = ctx.getParam("face_id");
+    if (typeof id === "string" && id.length) st.faceId = id;
+    const v = Number(ctx.getParam("vowel:effective"));
+    if (Number.isFinite(v)) st.vowel = v;
+    const a = Number(ctx.getParam("amplitude"));
+    if (Number.isFinite(a)) st.amp = a;
+    const n = ctx.getParam("preset_name");
+    if (typeof n === "string" && n.length) st.name = n;
+    const i = parseInt(ctx.getParam("preset"), 10);
+    if (Number.isFinite(i)) st.preset = i;
+    const c = parseInt(ctx.getParam("preset_count"), 10);
+    if (Number.isFinite(c) && c > 0) st.count = c;
 }
 
 globalThis.canvas_overlay = {
     /*
-     * TWO WIDGETS, declared as two. They are one drawing at two crops -- the
-     * same character, once whole and once zoomed to the mouth -- so they share
-     * one drawCell and are told apart by group.keys[0], which is what the ARRAY
-     * form of widgetKinds is for. (The object form would give them a drawer
-     * each; that is for widgets with nothing to do with each other.)
+     * ONE widget: the mouth. There was briefly a second, a whole-head readout
+     * in a "Who" cell, and it went because at 17x15 a head is an illegible blob
+     * -- and because it only existed to carry `face` to the cell next to it,
+     * which `extra_keys` now does without spending a knob slot.
      */
-    widgetKinds: ["custom:monkface", "custom:monkmouth"],
+    widgetKind: "custom:monkmouth",
 
     /* Drawn proportionally at every size, so there is no nominal frame. */
 
@@ -787,10 +828,17 @@ globalThis.canvas_overlay = {
         if (key === "vowel") {
             const raw = values ? Number(values.vowel) : NaN;
             if (!Number.isFinite(raw)) return;        /* same rule as above */
+            /*
+             * THE MOUTH ALONE.
+             *
+             * This drew face.head() around the aperture "so it reads as a mouth
+             * in a head". At 17x15 that head is a ring filling the cell edge to
+             * edge, sitting hard against the header rule above it -- which is
+             * exactly what "the vowel widget is cut off by the header" was. The
+             * aperture on its own is legible, and unmistakably a mouth the
+             * moment it moves.
+             */
             const u = unit(ctx, mouthCrop(face));
-            /* A ring of the surrounding face, so the aperture reads as a mouth
-             * in a head rather than as a floating blob. */
-            face.head(u, 0);
             drawMouth(u, face, raw, 1);
             return;
         }
@@ -821,25 +869,7 @@ globalThis.canvas_overlay = {
      * need a per-frame read. It is named here rather than faked.
      * ====================================================================== */
 
-    onOpen(ctx) { this._refresh(ctx); },
-
-    /* Reads live here because onOpen/onMidi are events. Never call from draw. */
-    _refresh(ctx) {
-        const st = ctx.state || (ctx.state = {});
-        if (typeof ctx.getParam !== "function") return;
-        const id = ctx.getParam("face_id");
-        if (typeof id === "string" && id.length) st.faceId = id;
-        const v = Number(ctx.getParam("vowel:effective"));
-        if (Number.isFinite(v)) st.vowel = v;
-        const a = Number(ctx.getParam("amplitude"));
-        if (Number.isFinite(a)) st.amp = a;
-        const n = ctx.getParam("preset_name");
-        if (typeof n === "string" && n.length) st.name = n;
-        const i = parseInt(ctx.getParam("preset"), 10);
-        if (Number.isFinite(i)) st.preset = i;
-        const c = parseInt(ctx.getParam("preset_count"), 10);
-        if (Number.isFinite(c) && c > 0) st.count = c;
-    },
+    onOpen(ctx) { refreshFromDevice(ctx); },
 
     onMidi(ctx, { data }) {
         if (!data || data.length < 3) return;
@@ -857,7 +887,7 @@ globalThis.canvas_overlay = {
             if (next >= count) next = 0;
             if (typeof ctx.setParam === "function") ctx.setParam("preset", String(next));
             st.preset = next;
-            this._refresh(ctx);
+            refreshFromDevice(ctx);
         }
     },
 

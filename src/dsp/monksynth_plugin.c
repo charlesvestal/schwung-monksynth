@@ -76,6 +76,46 @@ enum {
     P_COUNT
 };
 
+/*
+ * WHICH PARAMS ARE SLEWED, AND WHY THEY HAVE TO BE.
+ *
+ * The vendored engine ramps exactly two things: pitch and vowel, over its
+ * RAMP_TICKS = 10 ticks of 10 ms (the original Delay Lama's ramp). Everything
+ * else ASSIGNS -- monk_voice_set_voice and monk_voice_set_aspiration are a
+ * clamp and a store. So every knob detent was a hard discontinuity in a value
+ * the grain is rebuilt from, which is audible as stair-stepping, and it gets
+ * worse the faster you turn.
+ *
+ * Slewing here rather than upstream: dsp/ is vendored read-only, and this is a
+ * host-integration concern anyway -- a VST host sends automation at audio rate,
+ * while Move sends one discrete step per detent. Applied once per BLOCK
+ * (2.9 ms at 128 frames), which is well inside the ~30 ms the ear reads as
+ * immediate and far cheaper than per-sample.
+ *
+ * NOT slewed, deliberately:
+ *   unison        an integer VOICE COUNT -- slewing it thrashes allocation
+ *   glide, A/D/R  time constants, not signals; they are read when a stage
+ *                 begins, so a slewed value is just a lagged setting
+ * `sustain` IS slewed: it scales the envelope continuously, so a jump in it is
+ * a jump in level.
+ */
+static const int PARAM_SMOOTH[P_COUNT] = {
+    /* GLIDE */ 0, /* HEAD_SIZE */ 1, /* VIBRATO */ 1, /* VIBRATO_RATE */ 1,
+    /* ASPIRATION */ 1, /* ATTACK */ 0, /* DECAY */ 0, /* SUSTAIN */ 1,
+    /* RELEASE */ 0, /* UNISON */ 0, /* UNISON_DETUNE */ 1, /* UNISON_SPREAD */ 1,
+    /* DELAY */ 1, /* DELAY_RATE */ 1, /* LEVEL */ 1,
+};
+
+/*
+ * One-pole coefficient per 128-frame block at 44.1 kHz.
+ *
+ * 1 - exp(-2.9ms / 30ms) ~= 0.092. Thirty milliseconds is short enough that a
+ * turn feels attached to the knob and long enough to bridge a detent; the
+ * snap threshold below stops it creeping toward the target forever.
+ */
+#define SLEW_COEF   0.092f
+#define SLEW_SNAP   1.0e-4f
+
 /* Keys, in P_* order. */
 static const char *const PARAM_KEYS[P_COUNT] = {
     "glide", "head_size", "vibrato", "vibrato_rate", "aspiration",
@@ -168,7 +208,15 @@ static const char *const ROUTE_NAMES[ROUTE_COUNT] = {
 typedef struct {
     MonkSynthEngine *engine;
 
+    /*
+     * TARGET and CURRENT are separate, and get_param answers the TARGET.
+     *
+     * The knob's value is what the player set and what the UI must read back;
+     * `cur` is where the slew has got to, and only the engine sees it. Serving
+     * `cur` would make a knob appear to drift after you let go of it.
+     */
     float p[P_COUNT];
+    float cur[P_COUNT];
     int   preset;          /* index into CHARACTERS; -1 once a knob is moved */
     int   route;
     float bend_range;      /* semitones, 0..12 */
@@ -202,9 +250,9 @@ static float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); 
  * (unison rounds to a voice COUNT, spread halves, the envelope times are
  * seconds).
  */
-static void apply_param(monk_inst_t *in, int idx) {
-    MonkSynthEngine *s = in->engine;
-    const float v = in->p[idx];
+/* Push one value into the engine. `v` is the CURRENT (slewed) value, not the
+ * target -- see monk_inst_t. */
+static void apply_value(MonkSynthEngine *s, int idx, float v) {
     switch (idx) {
     case P_GLIDE:         monk_synth_set_glide(s, v); break;
     case P_HEAD_SIZE:     monk_synth_set_voice(s, v); break;   /* upstream's "voice" */
@@ -225,16 +273,46 @@ static void apply_param(monk_inst_t *in, int idx) {
     }
 }
 
-static void apply_all(monk_inst_t *in) {
-    for (int i = 0; i < P_COUNT; i++) apply_param(in, i);
+/*
+ * Apply a parameter now.
+ *
+ * A param that is not slewed goes straight through. A slewed one only has its
+ * TARGET moved here; render_block walks it there. The exception is `snap`,
+ * used at construction, where there is nothing to slew from and starting every
+ * value at zero would fade the first note in.
+ */
+static void apply_param(monk_inst_t *in, int idx, int snap) {
+    if (!PARAM_SMOOTH[idx] || snap) {
+        in->cur[idx] = in->p[idx];
+        apply_value(in->engine, idx, in->cur[idx]);
+    }
+}
+
+static void apply_all(monk_inst_t *in, int snap) {
+    for (int i = 0; i < P_COUNT; i++) apply_param(in, i, snap);
+}
+
+/* Walk every slewed parameter one block closer to its target. */
+static void slew_block(monk_inst_t *in) {
+    for (int i = 0; i < P_COUNT; i++) {
+        if (!PARAM_SMOOTH[i]) continue;
+        const float t = in->p[i], c = in->cur[i];
+        const float d = t - c;
+        if (d > -SLEW_SNAP && d < SLEW_SNAP) {
+            if (c != t) { in->cur[i] = t; apply_value(in->engine, i, t); }
+            continue;
+        }
+        in->cur[i] = c + d * SLEW_COEF;
+        apply_value(in->engine, i, in->cur[i]);
+    }
 }
 
 /* Load a character: its voice, and the face the JS surfaces draw. */
-static void apply_character(monk_inst_t *in, int idx) {
+static void apply_character(monk_inst_t *in, int idx, int snap) {
     if (idx < 0 || idx >= CHAR_COUNT) return;
     memcpy(in->p, CHARACTERS[idx].v, sizeof(in->p));
     in->preset = idx;
-    apply_all(in);
+    apply_all(in, snap);
 }
 
 /* ---------------------------------------------------------------- lifecycle */
@@ -252,7 +330,9 @@ static void *v2_create_instance(const char *dir, const char *cfg) {
     /* Vowel is not in the character table (see CHARACTERS), so seed upstream's
      * own default for it here rather than leaving the mouth shut at 0. */
     monk_synth_set_vowel(in->engine, 0.5f);
-    apply_character(in, 0);   /* Monk — upstream's Rabten defaults */
+    /* Snap at construction: there is no previous value to slew from, and
+     * slewing from zero would fade the first note in. */
+    apply_character(in, 0, 1);   /* Monk — upstream's Rabten defaults */
     return in;
 }
 
@@ -379,6 +459,10 @@ static void v2_render_block(void *instance, int16_t *out_lr, int frames) {
     }
     if (frames > MAX_FRAMES) frames = MAX_FRAMES;
 
+    /* Before the audio, not after: a target set by set_param since the last
+     * block must reach the engine before it renders with the old value. */
+    slew_block(in);
+
     monk_synth_process(in->engine, g_l, g_r, (uint32_t)frames);
 
     for (int i = 0; i < frames; i++) {
@@ -408,7 +492,9 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
 
     if (strcmp(key, "preset") == 0) {
         int idx = atoi(val);
-        if (idx >= 0 && idx < CHAR_COUNT) apply_character(in, idx);
+        /* A character change SLEWS -- fifteen values moving at once is exactly
+         * where an instant jump clicks. */
+        if (idx >= 0 && idx < CHAR_COUNT) apply_character(in, idx, 0);
         return;
     }
 
@@ -445,7 +531,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     for (int i = 0; i < P_COUNT; i++) {
         if (strcmp(key, PARAM_KEYS[i]) != 0) continue;
         in->p[i] = clamp01((float)atof(val));
-        apply_param(in, i);
+        apply_param(in, i, 0);
         return;
     }
 }
@@ -469,13 +555,15 @@ static void restore_state(monk_inst_t *in, const char *json) {
     /* Character first — it writes all fifteen, so the knobs below must win. */
     if (json_num(json, "preset", &f)) {
         int idx = (int)f;
-        if (idx >= 0 && idx < CHAR_COUNT) apply_character(in, idx);
+        /* A restore SNAPS: this is not a performance gesture, and slewing a
+         * whole slot into place on boot would be audible as a swell. */
+        if (idx >= 0 && idx < CHAR_COUNT) apply_character(in, idx, 1);
     }
 
     for (int i = 0; i < P_COUNT; i++) {
         if (!json_num(json, PARAM_KEYS[i], &f)) continue;
         in->p[i] = clamp01(f);
-        apply_param(in, i);
+        apply_param(in, i, 1);
     }
     if (json_num(json, "vowel", &f)) {
         in->vowel = clamp01(f);
@@ -510,15 +598,24 @@ static void restore_state(monk_inst_t *in, const char *json) {
  */
 static const char CHAIN_PARAMS_JSON[] =
 "["
+ /* NOT A KNOB any more. It was one only so the mouth widget beside it could
+  * read it off the page, which spent one of eight cells on a 17x15 head nobody
+  * could read. It is declared here so it has metadata, and reaches the widget
+  * through `extra_keys` on `vowel` instead. */
  "{\"key\":\"face\",\"name\":\"Who\",\"short_name\":\"Who\",\"type\":\"int\","
   "\"min\":0,\"max\":11,\"step\":1,\"default\":0,\"access\":\"read\","
-  "\"show_value\":false,\"viz\":{\"kind\":\"custom:monkface\"}},"
+  "\"show_value\":false},"
  "{\"key\":\"vowel\",\"name\":\"Vowel\",\"short_name\":\"Vow\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5,"
-  /* Its OWN kind. A module may declare several (canvas.js names both through
-   * widgetKinds); an older host that knows neither simply does not claim the
-   * key and draws a built-in dial. */
-  "\"viz\":{\"kind\":\"custom:monkmouth\"},"
+  /* THE MOUTH, and the character it belongs to.
+   *
+   * `extra_keys` names a value the picture needs that has NO CELL on this page.
+   * The mouth's five anchor shapes are per character, so the widget has to know
+   * which of the twelve is loaded -- and a widget cannot read, it is handed the
+   * page's value map. Before extra_keys existed the only way to get a fact to a
+   * widget was to give it a knob, which is exactly the useless "Who" cell this
+   * replaces. It costs one extra read stop in the page's rotation. */
+  "\"viz\":{\"kind\":\"custom:monkmouth\",\"extra_keys\":[\"face\"]},"
   "\"card_script\":\"cards.js#vowel_card\",\"card_w\":104,\"card_h\":46},"
  "{\"key\":\"head_size\",\"name\":\"Head Size\",\"short_name\":\"Head\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"
@@ -567,11 +664,12 @@ static const char UI_HIERARCHY_JSON[] =
   "\"root\":{"
    "\"label\":\"MonkSynth\","
    "\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_param\":\"preset_name\","
-   "\"knobs\":[\"face\",\"vowel\",\"head_size\",\"aspiration\",\"glide\",\"vibrato\",\"delay\",\"level\"],"
+   "\"knobs\":[\"vowel\",\"head_size\",\"aspiration\",\"glide\",\"vibrato\",\"unison\",\"delay\",\"level\"],"
    "\"params\":["
      "{\"key\":\"big_face\"},"
-     "{\"key\":\"face\"},{\"key\":\"vowel\"},{\"key\":\"head_size\"},{\"key\":\"aspiration\"},"
-     "{\"key\":\"glide\"},{\"key\":\"vibrato\"},{\"key\":\"delay\"},{\"key\":\"level\"},"
+     "{\"key\":\"vowel\"},{\"key\":\"head_size\"},{\"key\":\"aspiration\"},"
+     "{\"key\":\"glide\"},{\"key\":\"vibrato\"},{\"key\":\"unison\"},"
+     "{\"key\":\"delay\"},{\"key\":\"level\"},"
      "{\"level\":\"envelope\",\"label\":\"Envelope\"},"
      "{\"level\":\"unison\",\"label\":\"Unison\"},"
      "{\"level\":\"motion\",\"label\":\"Vibrato & Delay\"},"
