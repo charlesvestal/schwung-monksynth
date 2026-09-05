@@ -648,12 +648,51 @@ function mouthShape(face, v) {
  * reason the vowel is — a continuously scaling mouth reintroduces exactly the
  * glide that quantising the vowel removes.
  */
-function drawMouth(u, face, vowel, boost) {
+function drawMouth(u, face, vowel, boost, minPx) {
     const [w, h] = mouthShape(face, quantisedVowel(vowel));
     const b = boost || 1;
-    ellipse(u, face.mc[0], face.mc[1],
-            w * face.mbf * 0.5 * b, h * face.mbf * 0.5 * b, true, 1);
+    let rw = w * face.mbf * 0.5 * b;
+    let rh = h * face.mbf * 0.5 * b;
+
+    /*
+     * A PIXEL FLOOR, because some characters are flat by design.
+     *
+     * Punk, Cat and Unicorn have mouth anchors barely a tenth of a unit tall --
+     * a slot rather than an aperture, which is right on a phone and vanishes on
+     * a 40px head. Gain alone cannot rescue them: scaling a very flat ellipse
+     * keeps it flat. So the drawn HEIGHT is floored in pixels, which is the
+     * unit that actually decides whether a thing is visible.
+     *
+     * Width is never floored: it is the axis that carries the OO..EE morph on
+     * exactly those characters, and clamping it would flatten the animation to
+     * hold the shape.
+     */
+    if (minPx > 0) {
+        const minR = (minPx * 0.5) / u.s;
+        if (rh < minR) rh = minR;
+    }
+
+    ellipse(u, face.mc[0], face.mc[1], rw, rh, true, 1);
 }
+
+/*
+ * THE MOUTH IS DRAWN BIGGER THAN THE RIG SAYS, on the full-face surfaces.
+ *
+ * mouthBoxFraction is tuned for a phone, where the face is hundreds of pixels
+ * and the aperture is sized "so it cannot poke past the jawline at its widest
+ * anchor". Scaled down to a 40px head that is two or three pixels, and the one
+ * thing this whole screen exists to show becomes a speck -- judged on hardware
+ * as "the mouths all need to be large enough to discern".
+ *
+ * 1.6 was chosen by rendering all twelve and looking: enough that the OO..EE
+ * morph is unmistakable, not so much that an open mouth breaks the jaw, the
+ * muzzle or the beard it sits inside.
+ *
+ * NOT applied to the Vowel CELL, which is already a crop of the mouth alone --
+ * there the aperture fills the cell by construction, and a gain would simply
+ * push it past the edges.
+ */
+const FACE_MOUTH_GAIN = 1.6;
 
 function ampBoost(amp) {
     if (!(amp > 0)) return 1;
@@ -718,7 +757,9 @@ function paintFace(rawCtx, face, crop, vowel, amp, nowMs) {
     const d = faceDetail(rawCtx);
     face.head(u, d);
     face.eyes(u, blinking(nowMs), d);
-    drawMouth(u, face, vowel, ampBoost(amp));
+    /* 4px is the floor at which a filled aperture reads as a mouth rather than
+     * as a stray line, measured against these faces at 40px. */
+    drawMouth(u, face, vowel, ampBoost(amp) * FACE_MOUTH_GAIN, d >= 1 ? 4 : 0);
 }
 
 /* ==========================================================================
@@ -820,6 +861,8 @@ globalThis.canvas_overlay = {
     drawCell(ctx, { values, group, nowMs }) {
         const keys = (group && group.keys) || [];
         const key = keys[0] || "";
+        /* A cell has no browser to ask; the face is a sibling key on the
+         * page, named by this widget's own viz extra_keys. */
         const face = faceFrom(values ? values.face : null);
 
 
@@ -904,7 +947,23 @@ globalThis.canvas_overlay = {
         const w = c.width, h = c.height;
         if (w < 24 || h < 16) return;
 
-        const face = faceFrom(values ? values.face : null);
+        /*
+         * ONE SOURCE FOR THE FACE AND THE NAME.
+         *
+         * The face used to come from `values.face` and the name from the
+         * browser, and they disagreed on screen -- pizza's face over the name
+         * Punk. They update at completely different rates: jogging re-reads the
+         * preset name immediately, while `face` is an off-page extra key served
+         * one stop in a rotation of eleven, so the picture trailed the label by
+         * a character or more for as long as you kept browsing.
+         *
+         * On a browser page the index IS the character, it is the same fact the
+         * name comes from, and it is current the instant the jog moves. Falling
+         * back to `values.face` keeps a plain custom page working.
+         */
+        const face = faceFrom(
+            preset && Number.isFinite(preset.index) ? preset.index
+                                                    : (values ? values.face : null));
         const rawV = values ? Number(values.vowel) : NaN;
         const v = Number.isFinite(rawV) ? rawV : 0.5;
 
@@ -930,48 +989,43 @@ globalThis.canvas_overlay = {
          * changes.
          */
         const label = vowelName(v);
-        /*
-         * The character's name comes from the BROWSER when this page is one --
-         * that is the authority on which preset is selected, and it is not a
-         * parameter anybody could read. `face.name` is the fallback for a
-         * plain custom page.
-         */
         const nm = String((preset && preset.name) || face.name);
         const pos = preset && preset.count
             ? `${(preset.index || 0) + 1}/${preset.count}` : "";
 
         /*
-         * The face gets everything the text does not need.
+         * THE NAME GETS ITS OWN ROW, ON CLEARED GROUND.
          *
-         * It was a SQUARE (min(w, h)), which throws away most of a 128x44 band
-         * for any character wider than it is tall -- the fish lost its tail to
-         * the crop and still only filled a quarter of the screen. unit() fits
-         * without stretching, so a wide box simply lets a wide character grow;
-         * a round head is still bound by the height and is unchanged.
-         */
-        const textW = Math.max(c.textWidth(label), c.textWidth(nm), c.textWidth(pos));
-        const faceW = Math.max(16, w - textW - 6);
-
-        /*
-         * THE HEAD, not the whole figure.
+         * It used to sit in a right-hand column whose width was computed from
+         * the text, with the face given whatever was left. On hardware that
+         * produced "hter" and "irl" -- Fire Fighter and Little Girl with their
+         * first halves lost in the face's own lines. Not truncation (frameCtx
+         * clips from the END and refuses a negative x): the drawing and the
+         * label were simply sharing pixels, and only the part clear of the face
+         * stayed readable.
          *
-         * cropFull shows the character standing up -- robe, dress, tail -- and
-         * in a 44px band that makes the head about a third of it, which is a
-         * mouth of four pixels on the one screen whose job is showing the
-         * mouth. face.crop is the head-and-props box the cells use, so the same
-         * band gives a head roughly three times the size. The body is what a
-         * 128x64 panel cannot afford here.
+         * Blanking the strip first makes that impossible whatever the widths
+         * turn out to be, which is the only version of this that cannot come
+         * back the next time a name gets longer or a font changes.
          */
-        paintFace(subFrame(c, 0, 0, faceW, h), face, face.crop, v, 0, nowMs || 0);
+        const ROW = 8;
+        const nameY = h - ROW;
+        const faceH = Math.max(8, nameY - 1);
 
-        const lw = c.textWidth(label);
-        const nw = c.textWidth(nm);
-        const pw = c.textWidth(pos);
-        const room = w - faceW - 4;
-        if (lw <= room) c.print(w - lw, 2, label, 1);
-        if (pos && pw <= room) c.print(w - pw, 12, pos, 1);
-        if (nw <= room) c.print(w - nw, h - 8, nm, 1);
+        /* The readings keep the right-hand column; they are two and four
+         * characters and cannot collide with anything. */
+        const rw = Math.max(c.textWidth(label), c.textWidth(pos));
+        const faceW = Math.max(16, w - rw - 6);
+
+        paintFace(subFrame(c, 0, 0, faceW, faceH), face, face.crop, v, 0, nowMs || 0);
+
+        c.print(w - c.textWidth(label), 1, label, 1);
+        if (pos) c.print(w - c.textWidth(pos), 11, pos, 1);
+
+        c.fillRect(0, nameY - 1, w, ROW + 1, 0);
+        c.print(0, nameY, nm, 1);
     },
+
     onOpen(ctx) { refreshFromDevice(ctx); },
 
     onMidi(ctx, { data }) {
