@@ -1,5 +1,13 @@
 build/
 dist/
 faces-out/
+# ...except the two review sheets. They are the record of what the twelve faces
+# were actually judged against -- every art pass was decided by looking at these
+# rather than by reading the drawing code, and three defects (the ghost cropped
+# above its own hem, the dog's mouth filling its snout, the cat's nose and mouth
+# colliding) were visible in no other way. Same reasoning as schwung committing
+# its widget contact sheets.
+!faces-out/portraits.png
+!faces-out/mouth-sweep.png
 .DS_Store
 build-host/
