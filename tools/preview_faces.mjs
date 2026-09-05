@@ -41,6 +41,22 @@ if (!fs.existsSync(harnessPath)) {
 }
 const { createFramebuffer, drawContext } = await import(harnessPath);
 
+/*
+ * RENDER THROUGH THE HOST'S OWN REGISTRATION PATH, not by calling drawCell.
+ *
+ * Calling the overlay's drawCell directly is what let a real defect through
+ * once already: this module declared two widget kinds while the host registered
+ * only one, so on the device the Vowel cell drew a built-in dial -- and this
+ * tool, which never registered anything, rendered it perfectly. A preview that
+ * bypasses the wiring cannot see a wiring bug.
+ *
+ * So the widgets are registered exactly as shadow_ui does, and every cell is
+ * drawn through the registry. A kind the overlay fails to declare now fails
+ * here too, which is the whole point.
+ */
+const registryPath = path.join(SCHWUNG, "src", "shared", "param_pages", "widget_registry.mjs");
+const registry = await import(registryPath);
+
 /* ---- load canvas.js the way the device does: as a script over globalThis ---- */
 
 const src = fs.readFileSync(path.join(ROOT, "src", "ui", "canvas.js"), "utf8");
@@ -54,6 +70,40 @@ const { overlay, card, faces } = load(sandbox);
 if (!overlay || !card || !faces) {
     console.error("canvas.js did not expose canvas_overlay / vowel_card / faces");
     process.exit(1);
+}
+
+/*
+ * This module declares TWO widget kinds, which needs a host that can register
+ * more than one. Say so plainly: without this the failure is a bare
+ * "registerOverlayWidgets is not a function" pointing at this file, which reads
+ * as a bug here rather than as an out-of-date checkout.
+ */
+if (typeof registry.registerOverlayWidgets !== "function") {
+    console.error(
+        "This schwung checkout predates multi-widget registration.\n" +
+        `  checkout: ${SCHWUNG}\n` +
+        "MonkSynth declares two custom widget kinds (custom:monkface and\n" +
+        "custom:monkmouth), and a host that reads a single widgetKind string\n" +
+        "registers only the first -- the Vowel cell then silently draws a\n" +
+        "built-in dial. Update schwung, or point --schwung at a checkout that\n" +
+        "has widget_registry.registerOverlayWidgets.");
+    process.exit(2);
+}
+
+registry.clearWidgets();
+const reg = registry.registerOverlayWidgets(overlay);
+if (reg.skipped.length) {
+    console.error("FAIL: the host would refuse these declarations:");
+    for (const s2 of reg.skipped) console.error(`  ${s2.kind}: ${s2.why}`);
+    process.exit(1);
+}
+console.log(`registered: ${reg.registered.join(", ")}\n`);
+
+/* Draw a cell the way the page does: look the kind up in the registry. */
+function drawThroughRegistry(kind, ctx, payload) {
+    const impl = registry.getWidget(kind);
+    if (!impl) throw new Error(`kind ${kind} is not registered`);
+    impl.draw(ctx, payload);
 }
 
 /*
@@ -133,13 +183,15 @@ for (let i = 0; i < faces.length; i++) {
     /* The Who cell. */
     {
         const s = frameSurface(CELL_W, CELL_H);
-        overlay.drawCell(s.ctx, { values: { face: f.id }, group: { keys: ["face"] }, nowMs: 0 });
+        drawThroughRegistry("custom:monkface", s.ctx,
+            { values: { face: f.id }, group: { keys: ["face"] }, nowMs: 0 });
         row.push(s.fb);
     }
     /* The Vowel cell, across the sweep. */
     for (const v of SWEEP) {
         const s = frameSurface(CELL_W, CELL_H);
-        overlay.drawCell(s.ctx, { values: { face: f.id, vowel: v }, group: { keys: ["vowel"] }, nowMs: 0 });
+        drawThroughRegistry("custom:monkmouth", s.ctx,
+            { values: { face: f.id, vowel: v }, group: { keys: ["vowel"] }, nowMs: 0 });
         row.push(s.fb);
     }
     /*
@@ -151,10 +203,9 @@ for (let i = 0; i < faces.length; i++) {
      * cell immediately before, which is exactly the order the page uses.
      */
     for (const v of [0.0, 1.0]) {
-        const stamp = frameSurface(CELL_W, CELL_H);
-        overlay.drawCell(stamp.ctx, { values: { face: f.id }, group: { keys: ["face"] }, nowMs: 0 });
         const s = frameSurface(CARD_W, CARD_H);
-        card(s.ctx, { w: CARD_W, h: CARD_H, name: "Vowel", value: v.toFixed(2), raw: v });
+        card(s.ctx, { w: CARD_W, h: CARD_H, name: "Vowel", value: v.toFixed(2), raw: v,
+                      values: { face: f.id, vowel: v }, nowMs: 0 });
         row.push(s.fb);
     }
     /* The fullscreen face. */

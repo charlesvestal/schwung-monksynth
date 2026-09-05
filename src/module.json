@@ -41,7 +41,7 @@
         "step": 0.01,
         "default": 0.5,
         "viz": {
-          "kind": "custom:monkface"
+          "kind": "custom:monkmouth"
         },
         "card_script": "cards.js#vowel_card",
         "card_w": 104,

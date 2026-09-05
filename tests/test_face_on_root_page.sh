@@ -23,9 +23,19 @@ if params["face"].get("access") != "read":
     sys.exit("FAIL: 'face' must be access:'read' -- it is a readout, "
              "set by loading a character, never turned")
 
+# Both declare a custom kind, and canvas.js must NAME both -- a kind the overlay
+# does not declare is never registered and falls through to a built-in dial,
+# silently. (They no longer have to be the SAME kind: a module may declare
+# several, as of schwung's widgetKinds.)
 kinds = {k: params[k].get("viz", {}).get("kind") for k in ("face", "vowel")}
-if len(set(kinds.values())) != 1 or not all(kinds.values()):
-    sys.exit(f"FAIL: face and vowel must declare the SAME custom kind "
-             f"(the host registers only one per module); got {kinds}")
-print(f"PASS: face and vowel are both root knobs sharing {kinds['face']}, face is read-only")
+if not all(kinds.values()):
+    sys.exit(f"FAIL: both face and vowel must declare a custom viz kind; got {kinds}")
+
+canvas = open("src/ui/canvas.js").read()
+for k in kinds.values():
+    if f'"{k}"' not in canvas:
+        sys.exit(f"FAIL: {k} is declared in chain_params but canvas.js never names it, "
+                 "so it would never register")
+print(f"PASS: face and vowel are root knobs, face is read-only, "
+      f"and canvas.js names both {kinds['face']} and {kinds['vowel']}")
 PY

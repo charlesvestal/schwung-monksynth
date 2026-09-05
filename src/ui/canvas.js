@@ -2,11 +2,8 @@
  * MonkSynth — all three module-supplied draw surfaces, and the twelve faces
  * they share.
  *
- *   drawCell  "custom:monkface"  ONE kind, TWO cells -- the whole face in the
- *                               Who cell, the mouth aperture in the Vowel
- *                               cell, told apart by the key. The host
- *                               registers a single widgetKind per module, so
- *                               a second name would never be registered.
+ *   drawCell  "custom:monkface"  the whole face, in the Who cell
+ *   drawCell  "custom:monkmouth" that character's mouth, in the Vowel cell
  *   vowel_card                    the face + vowel name, floating on a turn
  *   draw                          the fullscreen face, and the character picker
  *
@@ -755,7 +752,14 @@ function mouthCrop(face) {
 }
 
 globalThis.canvas_overlay = {
-    widgetKind: "custom:monkface",
+    /*
+     * TWO WIDGETS, declared as two. They are one drawing at two crops -- the
+     * same character, once whole and once zoomed to the mouth -- so they share
+     * one drawCell and are told apart by group.keys[0], which is what the ARRAY
+     * form of widgetKinds is for. (The object form would give them a drawer
+     * each; that is for widgets with nothing to do with each other.)
+     */
+    widgetKinds: ["custom:monkface", "custom:monkmouth"],
 
     /* Drawn proportionally at every size, so there is no nominal frame. */
 
@@ -764,11 +768,7 @@ globalThis.canvas_overlay = {
         const key = keys[0] || "";
         const face = faceFrom(values ? values.face : null);
 
-        /*
-         * PUBLISH THE FACE FOR THE CARD. See publishFace() — this is the only
-         * place the character is knowable, and the card cannot ask.
-         */
-        if (face) publishFace(face.id, nowMs);
+
 
         /*
          * NO ANSWER, NO PICTURE. A face we cannot identify must not fall back
@@ -952,51 +952,6 @@ function subFrame(ctx, ox, oy, w, h) {
  * drawing a mouth at zero, which would be indistinguishable from a real OO.
  * ========================================================================== */
 
-/*
- * ==========================================================================
- * THE ONE SIDE CHANNEL IN THIS FILE, AND WHY IT HAS TO EXIST
- *
- * A card drawer is handed EXACTLY { w, h, name, value, raw } — no values map,
- * no sibling keys, no getParam. So a card on `vowel` is told the vowel and
- * nothing else, and it cannot learn which of the twelve characters is loaded.
- * Every documented route was checked: `raw` is the vowel, `name`/`value` are
- * the parameter's own strings, and the card script is loaded into its own
- * closure so a module-scope variable set by drawCell is not visible to it.
- *
- * What the two DO share is globalThis. drawCell runs every frame the page is
- * up and IS given `values.face`, so it stamps the character here and the card
- * reads it back.
- *
- * The stamp carries a TIMESTAMP and the card ignores anything older than
- * STALE_MS. That is not belt-and-braces — it is the correctness condition. The
- * global outlives the page, so without it a card raised on a page where `face`
- * is absent would confidently draw whichever character was last seen on some
- * earlier page. A stale stamp must degrade to "no answer", which is the same
- * rule `raw === null` obeys three lines further down.
- *
- * If the widget never registered (an older host that does not know
- * custom: kinds) nothing is ever stamped, the card finds no face, and it falls
- * back to the plain reading — which is exactly what that host would show
- * anyway.
- * ========================================================================== */
-
-const FACE_STAMP_KEY = "__monksynth_face";
-const FACE_STALE_MS = 750;
-
-function publishFace(id, nowMs) {
-    globalThis[FACE_STAMP_KEY] = { id, at: typeof nowMs === "number" ? nowMs : 0 };
-}
-
-function stampedFace(nowMs) {
-    const st = globalThis[FACE_STAMP_KEY];
-    if (!st || typeof st.id !== "string") return null;
-    /* nowMs is only passed on the cell path; when the card has no clock of its
-     * own the stamp is trusted, because the only way it exists at all is that a
-     * cell drew this frame. */
-    if (typeof nowMs === "number" && st.at && Math.abs(nowMs - st.at) > FACE_STALE_MS) return null;
-    return FACE_BY_ID[st.id] || null;
-}
-
 globalThis.vowel_card = function (ctx, o) {
     const c = norm(ctx);
     const w = c.width, h = c.height;
@@ -1025,7 +980,19 @@ globalThis.vowel_card = function (ctx, o) {
      * character comes from `o.face`, which the module serves beside the value;
      * if it did not answer we are back to the no-picture rule above.
      */
-    const face = stampedFace(o.nowMs);
+    /*
+     * THE CHARACTER, READ OFF THE PAGE.
+     *
+     * `values` is the page's value map -- the same one drawCell gets -- so the
+     * card learns which of the twelve is loaded exactly the way the cells do.
+     * This used to be a stamp on globalThis written by drawCell, because the
+     * card payload carried only this parameter's own value; the host carries
+     * the siblings now, so the side channel is gone.
+     *
+     * Same null rule as `raw`: an absent or unanswered `face` means we do not
+     * know the character, and not knowing must not become a picture.
+     */
+    const face = faceFrom(o.values ? o.values.face : null);
     const top = 9;
     if (!face) {
         c.print(0, top + 2, "vowel " + n.toFixed(2), 1);

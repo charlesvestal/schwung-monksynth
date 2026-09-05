@@ -515,12 +515,10 @@ static const char CHAIN_PARAMS_JSON[] =
   "\"show_value\":false,\"viz\":{\"kind\":\"custom:monkface\"}},"
  "{\"key\":\"vowel\",\"name\":\"Vowel\",\"short_name\":\"Vow\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5,"
-  /* THE SAME KIND AS `face`, and that is forced, not stylistic: the host
-   * registers exactly ONE custom kind per module (`ov.widgetKind` is a single
-   * string). Two names means the second one is never registered and its cell
-   * silently falls back to a built-in dial. canvas.js's drawCell tells the two
-   * cells apart by their KEY instead. */
-  "\"viz\":{\"kind\":\"custom:monkface\"},"
+  /* Its OWN kind. A module may declare several (canvas.js names both through
+   * widgetKinds); an older host that knows neither simply does not claim the
+   * key and draws a built-in dial. */
+  "\"viz\":{\"kind\":\"custom:monkmouth\"},"
   "\"card_script\":\"cards.js#vowel_card\",\"card_w\":104,\"card_h\":46},"
  "{\"key\":\"head_size\",\"name\":\"Head Size\",\"short_name\":\"Head\",\"type\":\"float\","
   "\"min\":0,\"max\":1,\"step\":0.01,\"default\":0.5},"

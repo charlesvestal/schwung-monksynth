@@ -38,17 +38,25 @@ set of drawing functions:
 | `card_script` | floats while Vowel turns | the face mouthing the vowel, plus the anchor name and a travel bar |
 | `type: "canvas"` | fullscreen | the whole character; the jog steps through all twelve |
 
-Three constraints shaped that table, all of them discovered rather than
-assumed, and all documented at the code:
+Building it turned up three host constraints. Two were limits worth removing,
+and they were fixed upstream rather than worked around here:
 
-- **One custom kind per module.** The host registers a single `widgetKind` from
-  a hardcoded `canvas.js`, so both cells declare `custom:monkface` and
-  `drawCell` tells them apart by key.
-- **A cell cannot read.** It gets the page's value map, which is why `face` is
-  pinned to the same page as `vowel` — with a test.
-- **A card gets only `{w, h, name, value, raw}`.** No sibling keys at all, so
-  the character reaches it through a timestamped stamp on `globalThis` that
-  `drawCell` writes. See the long comment above `vowel_card`.
+- **One custom kind per module.** The host read a single `widgetKind` string, so
+  a second declared kind was silently dropped onto a built-in dial. Schwung now
+  takes `widgetKinds`; this module declares `custom:monkface` and
+  `custom:monkmouth` as the array form.
+- **A card could not see the page.** Its payload was `{w, h, name, value, raw}`,
+  so it could not learn which character was loaded. It briefly went through a
+  timestamped `globalThis` stamp — a side channel. The payload now carries
+  `values` and `nowMs`, and the card reads `values.face` like any cell.
+- **A cell cannot read**, and that one is correct as it stands: a widget is
+  handed the page's value map, which is why `face` is pinned to the same page as
+  `vowel` — with a test.
+
+**This module therefore needs a Schwung with `registerOverlayWidgets`.** On an
+older host the Vowel cell falls back to a built-in dial and the card loses its
+face; nothing else breaks. `tools/preview_faces.mjs` refuses to run against such
+a checkout and says so.
 
 ## Build
 
