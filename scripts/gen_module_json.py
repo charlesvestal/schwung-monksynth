@@ -10,7 +10,7 @@ contract = json.loads(subprocess.check_output([sys.executable, str(HERE / "extra
 module = {
     "id": "monksynth",
     "name": "MonkSynth",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": ("Monophonic formant (FOF) vocal synthesizer with twelve singing "
                     "characters - an homage to Delay Lama. Pad pressure sweeps the vowel."),
     "author": "Jonathan Taylor (DSP), Charles Vestal (port)",

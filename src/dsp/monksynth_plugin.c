@@ -245,6 +245,16 @@ typedef struct {
     float expr_cur;        /* slewed toward `expr` -- pressure, 0..1 */
     float pressure_depth;  /* how far full pressure moves the vowel */
     float expr;            /* last routed expression value, 0..1 */
+
+    /*
+     * The bend LAST HANDED TO THE ENGINE, in semitones.
+     *
+     * Kept because the engine has no "no longer routed" state of its own: it
+     * holds whatever bend it was last given. Routing pressure away from pitch
+     * therefore has to write the zero, and writing it needs knowing that the
+     * engine is not already there -- see slew_block.
+     */
+    float bend_cur;
 } monk_inst_t;
 
 /* ------------------------------------------------------------- conversions */
@@ -339,10 +349,27 @@ static void slew_block(monk_inst_t *in) {
 
     monk_synth_set_vowel(in->engine, combined_vowel(in));
 
-    /* Pitch, for the modes that route pressure there. Applied every block for
-     * the same reason as the vowel: a 7-bit step is audible. */
-    if (in->route == ROUTE_BOTH || in->route == ROUTE_BOTH_INV || in->route == ROUTE_PITCH)
-        monk_synth_set_pitch_bend(in->engine, in->expr_cur * in->bend_range);
+    /*
+     * Pitch, for the modes that route pressure there. Applied every block for
+     * the same reason as the vowel: a 7-bit step is audible.
+     *
+     * THE OTHER MODES MUST WRITE THE ZERO, not simply skip the call. Skipping
+     * left the engine holding the last bend it was given, so leaning on a pad
+     * in Pitch and then routing pressure to Vowel left the synth permanently
+     * sharp, with nothing on the page still claiming to bend it. The unrouted
+     * modes have a pitch offset -- it is zero -- and saying so is what makes
+     * the routing switch complete.
+     *
+     * Written only when it CHANGES: set_pitch_bend walks every unison voice,
+     * and in the vowel-only default the value is a constant zero.
+     */
+    const float bend = (in->route == ROUTE_BOTH || in->route == ROUTE_BOTH_INV ||
+                        in->route == ROUTE_PITCH)
+                     ? in->expr_cur * in->bend_range : 0.0f;
+    if (bend != in->bend_cur) {
+        in->bend_cur = bend;
+        monk_synth_set_pitch_bend(in->engine, bend);
+    }
     for (int i = 0; i < P_COUNT; i++) {
         if (!PARAM_SMOOTH[i]) continue;
         const float t = in->p[i], c = in->cur[i];
@@ -378,6 +405,7 @@ static void *v2_create_instance(const char *dir, const char *cfg) {
     in->vowel = 0.5f;
     in->vowel_cur = 0.5f;
     in->expr_cur = 0.0f;
+    in->bend_cur = 0.0f;    /* matches a fresh engine's own zero */
     in->pressure_depth = 0.5f;
     /* Vowel is not in the character table (see CHARACTERS), so seed upstream's
      * own default for it here rather than leaving the mouth shut at 0. */
@@ -873,6 +901,13 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                        : combined_target(in);
         return snprintf(buf, buf_len, "%.4f", ev);
     }
+    /*
+     * The bend the engine is actually holding, in semitones -- the same
+     * `:effective` convention as the vowel, and the only window onto the
+     * routing's pitch half from outside.
+     */
+    if (strcmp(key, "bend:effective") == 0)
+        return snprintf(buf, buf_len, "%.4f", in->bend_cur);
     if (strcmp(key, "amplitude") == 0)
         return snprintf(buf, buf_len, "%.4f", monk_synth_amplitude(in->engine));
     if (strcmp(key, "active") == 0)

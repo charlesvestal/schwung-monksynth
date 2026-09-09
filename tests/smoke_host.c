@@ -217,6 +217,37 @@ int main(int argc, char **argv) {
     api->on_midi(inst, at_off, 3, MOVE_MIDI_SOURCE_INTERNAL);
     SETTLE();
 
+    /*
+     * --- routing pressure AWAY from pitch must undo the bend ---
+     *
+     * The engine holds the last bend it was handed. The pitch modes used to be
+     * the only writers, so leaning on a pad in Pitch and then choosing Vowel
+     * left the synth stuck sharp with nothing on the page bending it.
+     */
+    api->set_param(inst, "bend_range", "12");
+    api->set_param(inst, "pressure_routing", "1");     /* Pitch */
+    api->on_midi(inst, at_hi, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+    api->get_param(inst, "bend:effective", buf, sizeof(buf));
+    ok(atof(buf) > 11.0, "in Pitch, full pressure bends the engine");
+
+    api->set_param(inst, "pressure_routing", "0");     /* Vowel */
+    SETTLE();
+    api->get_param(inst, "bend:effective", buf, sizeof(buf));
+    ok(fabs(atof(buf)) < 1e-6, "routing away from pitch returns the bend to zero");
+
+    /* And back: the bend must follow the still-held pressure again, not stay
+     * zeroed. */
+    api->set_param(inst, "pressure_routing", "2");     /* Both */
+    SETTLE();
+    api->get_param(inst, "bend:effective", buf, sizeof(buf));
+    ok(atof(buf) > 11.0, "routing back to a pitch mode bends again");
+
+    api->set_param(inst, "pressure_routing", "0");
+    api->set_param(inst, "bend_range", "2");
+    api->on_midi(inst, at_off, 3, MOVE_MIDI_SOURCE_INTERNAL);
+    SETTLE();
+
     /* --- state round-trip --- */
     api->set_param(inst, "preset", "2");
     api->set_param(inst, "head_size", "0.1234");

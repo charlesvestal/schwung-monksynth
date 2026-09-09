@@ -11,62 +11,34 @@ An homage to the **Delay Lama** VST plug-in by AudioNerdz (2002), by way of
 MonkSynth is offered completely free of charge. If you enjoy it, you are kindly
 requested to make a donation at [savetibet.org](https://www.savetibet.org).
 
-## What it is
+## Features
 
-- **Monophonic**, with a 16-deep note stack — overlapping notes retune rather
+- **Twelve characters.** Jog the Presets page and each one loads its own voice
+  *and* its own face: Monk, Fish, Unicorn, Little Girl, Old Man, Cow, Dog,
+  Ghost, Officer Eeoo, Punk, Pizza, Cat.
+- **Pad pressure sweeps the vowel.** Move has no pitch or mod wheel, so
+  polyphonic aftertouch takes the place of the original's pitch wheel. Four
+  routings — Vowel, Pitch, Both, Both Inv — with an adjustable depth, and
+  pressure *modifies* the Vowel knob rather than replacing it.
+- **Monophonic with a 16-deep note stack.** Overlapping notes retune rather
   than retrigger, and releasing the top note falls back to the one still held.
-- **Twelve characters as presets.** Jog the Presets page and each one loads its
-  own voice *and* its own face. Six are hand-tuned (Monk, Fish, Unicorn, Little
-  Girl, Old Man, Cow); six are upstream's own factory patches wearing new faces
-  (Dog, Ghost, Officer Eeoo, Punk, Pizza, Cat).
-- **Pad pressure sweeps the vowel.** The original did this with the pitch
-  wheel; Move has neither a pitch wheel nor a mod wheel, so polyphonic
-  aftertouch takes its place. Four routings: Vowel, Both, Both Inv, Pitch.
 - **Unison** up to ten voices, with detune and vocal-tract spread, plus the
   stereo delay the factory characters were voiced with.
+- **The face is drawn everywhere:** as a mouth in the knob grid, as a card that
+  floats while the Vowel knob turns, as a fullscreen portrait with a live vowel
+  readout, and as the character picker page.
 
-## The four drawing surfaces
+External gear on USB-A also gets real pitch bend, channel pressure and CC.
 
-This module is also a worked example of every module-supplied draw surface
-Schwung offers, which is why the faces exist at four different scales from one
-set of drawing functions:
+## Requirements
 
-| Surface | Where | What it draws |
-|---|---|---|
-| `drawCell` (Vowel) | knob grid | that character's **mouth**, cropped tight so the morph reads at 17×15 |
-| `card_script` | floats while Vowel turns | the face mouthing the vowel, plus the anchor name and a travel bar |
-| `type: "canvas"` | fullscreen | a legible character portrait and live vowel readout |
-| `drawPage` | character picker | the same portrait construction, cropped for the 120×45 picker frame; the jog steps through all twelve |
+Schwung host **1.2.1 or newer**. On an older host the module still loads, but
+the Vowel cell falls back to a plain dial, the card loses its face, and there
+is no Face page.
 
-Building it turned up three host constraints. Two were limits worth removing,
-and they were fixed upstream rather than worked around here:
+## Install
 
-- **A whole face is too small for a knob cell.** The first design spent a second
-  custom widget on a 17×15 character readout. It was an illegible blob, so the
-  grid now shows only the mouth and passes the character through `extra_keys`.
-- **A card could not see the page.** Its payload was `{w, h, name, value, raw}`,
-  so it could not learn which character was loaded. It briefly went through a
-  timestamped `globalThis` stamp — a side channel. The payload now carries
-  `values` and `nowMs`, and the card reads `values.face` like any cell.
-- **A cell cannot read**, and that one is correct as it stands: a widget is
-  handed the page's value map, which is why `face` is pinned to the same page as
-  `vowel` — with a test.
-
-### Host requirement
-
-**`min_host_version` is 1.2.1** — meaning "anything after v1.2.0", which is when
-every feature above landed. Both version comparators are numeric per component,
-so that floor admits 1.3.0 too; naming 1.3.0 instead would wrongly reject a
-1.2.1 host that carried them.
-
-On an older host the module still loads: the Vowel cell falls back to a built-in
-dial, the card loses its face, and there is no Face page. `tools/preview_faces.mjs`
-refuses to run against such a checkout and says why.
-
-The value is read from the **catalog entry**, not from `module.json` — it is
-recorded in both so they cannot drift.
-
-## Build
+Install from Schwung's Module Store, or build it yourself:
 
 ```bash
 ./scripts/build.sh          # cross-compiles for ARM64 in Docker
@@ -84,34 +56,57 @@ way the chain host does — the contract, all twelve presets, MIDI, pad pressure
 state round-trip, junk input, and the output level across every character.
 
 `tests/test_faces_render.sh` renders all twelve characters across all four
-surfaces to a PNG and asserts each one actually drew, that nothing ran off the
-panel, and that every glyph exists in the device font. Look at the sheet:
+drawing surfaces to a PNG and asserts each one actually drew, that nothing ran
+off the panel, and that every glyph exists in the device font. To look at the
+sheet:
 
 ```bash
 node tools/preview_faces.mjs && open faces-out/faces.png
 ```
 
-## The DSP is vendored, and read-only
-
-`src/dsp/{synth,voice,delay}.{c,h}` and `synth_internal.h` come from upstream
-unmodified. Fix DSP bugs upstream and re-pull with `./scripts/sync_dsp.sh`;
-never patch them here, or the next sync reverts the fix. `monksynth_plugin.c`
-is the Schwung adapter and is ours.
-
-`src/module.json` is **generated** from the C contract by
-`scripts/gen_module_json.py` — don't hand-edit it.
-
-## Measured costs
+## Performance
 
 | | |
 |---|---|
-| `create_instance` | ~0.8 ms (2.58 MB, ten voices' tables) — a brief click on load |
+| `create_instance` | ~0.8 ms (2.58 MB, ten voices' tables) |
 | `render_block`, mono | 4.3 µs/block |
 | `render_block`, unison 9 | 31.5 µs/block |
 | output level | −21.3 dBFS RMS mean across the twelve, 6.8 dB spread |
 
-Against Schwung's ~2370 µs frame budget, on an Apple Silicon host; scale for
-the Cortex-A72. Unison 10 is comfortably usable.
+Measured on an Apple Silicon host against Schwung's ~2370 µs frame budget;
+scale for the Cortex-A72. Unison 10 is comfortably usable.
+
+## Development notes
+
+**The DSP is vendored and read-only.** `src/dsp/{synth,voice,delay}.{c,h}` and
+`synth_internal.h` come from upstream unmodified. Fix DSP bugs upstream and
+re-pull with `./scripts/sync_dsp.sh`; never patch them here, or the next sync
+reverts the fix. `monksynth_plugin.c` is the Schwung adapter and is ours.
+
+**`src/module.json` is generated** from the C contract by
+`scripts/gen_module_json.py` — don't hand-edit it.
+
+**Faces are drawn by one set of functions at four scales**, which makes this
+module a worked example of every module-supplied draw surface Schwung offers:
+
+| Surface | Where | What it draws |
+|---|---|---|
+| `drawCell` (Vowel) | knob grid | the character's **mouth**, cropped tight so the morph reads at 17×15 |
+| `card_script` | floats while Vowel turns | the face mouthing the vowel, the anchor name and a travel bar |
+| `type: "canvas"` | fullscreen | a legible portrait and live vowel readout |
+| `drawPage` | character picker | the same portrait, cropped for the 120×45 picker frame |
+
+A whole face is illegible in a 17×15 knob cell, which is why the grid shows
+only the mouth and passes the character through `extra_keys`. A widget is
+handed its page's value map and nothing else, so `face` is pinned to the same
+page as `vowel` — with a test.
+
+`min_host_version` is **1.2.1**, meaning "anything after v1.2.0", when the
+`values`/`nowMs` card payload and the other surfaces above landed. Version
+comparison is numeric per component, so that floor admits 1.3.0 too. The value
+is read from the catalog entry, not from `module.json`; it is recorded in both
+so they cannot drift, and `tools/preview_faces.mjs` refuses to run against a
+checkout without those host features.
 
 ## Licence
 
