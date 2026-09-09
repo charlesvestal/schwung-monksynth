@@ -105,16 +105,20 @@ function norm(ctx) {
     };
 }
 
-function unit(rawCtx, crop) {
+function unit(rawCtx, crop, xScaleOverride) {
     const ctx = norm(rawCtx);
     const cw = crop[2] - crop[0], ch = crop[3] - crop[1];
-    const s = Math.min(ctx.width / cw, ctx.height / ch);
-    const ox = (ctx.width - cw * s) / 2 - crop[0] * s;
+    /* A horizontal creature can use more of a landscape picker without making
+     * its circular features oval: coordinate placement stretches in X, while
+     * radii and stroke sizes continue to use the isotropic base scale. */
+    const sx = xScaleOverride > 0 ? xScaleOverride : 1;
+    const s = Math.min(ctx.width / (cw * sx), ctx.height / ch);
+    const ox = (ctx.width - cw * s * sx) / 2 - crop[0] * s * sx;
     const oy = (ctx.height - ch * s) / 2 - crop[1] * s;
     return {
         ctx,
         s,
-        x(fx) { return ox + fx * s; },
+        x(fx) { return ox + fx * s * sx; },
         y(fy) { return oy + fy * s; },
         /* A length in unit-square terms, never below one pixel: a stroke that
          * rounds to zero makes a feature vanish at cell size instead of
@@ -224,6 +228,20 @@ function tri(u, ax, ay, bx, by, cx2, cy2, color) {
     }
 }
 
+/* An unfilled triangle for cues that become heavy white wedges at 1 bit. */
+function triOutline(u, ax, ay, bx, by, cx2, cy2, color) {
+    const c = color === undefined ? 1 : color;
+    uline(u, ax, ay, bx, by, c);
+    uline(u, bx, by, cx2, cy2, c);
+    uline(u, cx2, cy2, ax, ay, c);
+}
+
+/* An opaque triangular foreground part: clear what is behind, then outline. */
+function triSolid(u, ax, ay, bx, by, cx2, cy2) {
+    tri(u, ax, ay, bx, by, cx2, cy2, 0);
+    triOutline(u, ax, ay, bx, by, cx2, cy2, 1);
+}
+
 /*
  * A quadratic curve, as a polyline.
  *
@@ -252,7 +270,7 @@ function quad(u, x0, y0, cx, cy, x1, y1, color) {
  * the unit mapper, the character's own geometry and whether the eye is shut.
  */
 
-/* A stroked arc bowing DOWNWARD — monk, old man, fire fighter. */
+/* A stroked arc bowing DOWNWARD — monk, old man, Officer Eeoo. */
 function arcEyes(u, cxs, fy, hw, depth, shut) {
     const d = shut ? depth[1] : depth[0];
     for (const cx of cxs) quad(u, cx - hw, fy, cx, fy + d, cx + hw, fy, 1);
@@ -314,10 +332,11 @@ function flickEyes(u, cxs, fy, hw, flick, shut) {
 
 /* ------------------------------------------------------------ the twelve ---
  *
- * `crop` is the head-and-props box the small surfaces show; `cropFull` is what
- * the fullscreen face shows. Two crops rather than one because a 17x15 cell
- * showing a whole body is four grey pixels, and a fullscreen view showing only
- * a head throws away the robe, the tail and the pizza.
+ * `crop` is the head-and-props box the small surfaces show; `cropFull` keeps
+ * the complete rig available; `portrait` composes the fullscreen view. Most
+ * portraits use a head-and-shoulders crop so the face survives at 128x64.
+ * Fish, Ghost and Pizza keep the full figure because their silhouette is their
+ * identity. A single crop either shrinks human faces or amputates those three.
  *
  * `d` is a DETAIL BUDGET derived from the frame size by faceDetail() below:
  * 0 for a knob cell, 1 for a card, 2 for the panel. A feature that would land
@@ -330,62 +349,103 @@ const FACES = [
     id: "monk", name: "Monk",
     anchors: [[0.16,0.26],[0.26,0.30],[0.34,0.22],[0.40,0.13],[0.44,0.07]],
     mc: [0.5,0.394], mbf: 0.27,
-    crop: [0.29,0.09,0.71,0.51], cropFull: [0.02,0.06,0.98,1.00],
+    crop: [0.29,0.09,0.71,0.51], picker: [0.25,0.04,0.75,0.57], cropFull: [0.02,0.06,0.98,1.00],
+    portrait: [0.16,0.05,0.84,0.76],
     head(u, d) {
-        /* Ears first, so the head circle overlaps their inner half and leaves
-         * the outer crescent — exactly the layering the Swift relies on. */
-        if (d >= 1) for (const cx of [0.337, 0.663]) ellipse(u, cx, 0.318, 0.0225, 0.038, false, 1);
+        /* Back to front: robe and neck first, then ears, then the opaque head.
+         * The head clears the neck where it passes behind the jaw. */
+        if (d >= 2) {
+            uline(u, 0.44, 0.43, 0.43, 0.50); uline(u, 0.56, 0.43, 0.57, 0.50);
+            quad(u, 0.20, 0.58, 0.27, 0.50, 0.43, 0.50);
+            quad(u, 0.57, 0.50, 0.73, 0.50, 0.80, 0.58);
+            quad(u, 0.80, 0.58, 0.90, 0.66, 0.92, 0.78);
+            quad(u, 0.20, 0.58, 0.10, 0.66, 0.08, 0.78);
+            uline(u, 0.92, 0.78, 0.90, 0.99); uline(u, 0.08, 0.78, 0.10, 0.99);
+            quad(u, 0.10, 0.99, 0.50, 1.02, 0.90, 0.99);
+        }
+        /* Ears first, so the head circle overlaps their inner half. Snap the
+         * pair around the SAME integer centre: independently rounded ellipse
+         * centres left one visible crescent a pixel higher on the panel. */
+        if (d >= 1) {
+            const mid = 0.5 + (Math.round(u.x(0.5)) - u.x(0.5)) / u.s;
+            const earY = 0.318 + (Math.round(u.y(0.318)) - u.y(0.318)) / u.s;
+            const earDx = Math.round(0.16 * u.s) / u.s;
+            for (const side of [-1, 1])
+                ellipse(u, mid + side * earDx, earY, 0.0225, 0.038, false, 1);
+        }
         circleSolid(u, 0.5, 0.30, 0.17);
-        if (d < 2) return;
-        /* Neck, then the robe: shoulders, hem, and the drape line whose upper
-         * side is the bare shoulder. */
-        uline(u, 0.44, 0.43, 0.43, 0.50); uline(u, 0.56, 0.43, 0.57, 0.50);
-        quad(u, 0.20, 0.58, 0.27, 0.50, 0.43, 0.50);
-        quad(u, 0.57, 0.50, 0.73, 0.50, 0.80, 0.58);
-        quad(u, 0.80, 0.58, 0.90, 0.66, 0.92, 0.78);
-        quad(u, 0.20, 0.58, 0.10, 0.66, 0.08, 0.78);
-        uline(u, 0.92, 0.78, 0.90, 0.99); uline(u, 0.08, 0.78, 0.10, 0.99);
-        quad(u, 0.10, 0.99, 0.50, 1.02, 0.90, 0.99);
-        quad(u, 0.57, 0.50, 0.74, 0.64, 0.95, 0.80);   /* the drape */
+        if (d >= 2) {
+            /* Two parallel folds make this a sash, not a stray diagonal. */
+            quad(u, 0.57, 0.50, 0.73, 0.62, 0.91, 0.76);
+            quad(u, 0.61, 0.48, 0.77, 0.59, 0.94, 0.71);
+        }
     },
     eyes(u, shut, d) { arcEyes(u, [0.415, 0.585], 0.296, 0.05, [0.027, 0.011], shut); },
 },
 {
     id: "fish", name: "Fish",
     /* A PROFILE, facing right: one eye, and a mouth off-axis at fx 0.80. */
-    anchors: [[0.42,0.30],[0.55,0.46],[0.62,0.62],[0.50,0.48],[0.34,0.28]],
-    mc: [0.80,0.56], mbf: 0.20,
+    /* Exaggerated at the five phoneme anchors because this side-profile mouth
+     * has only a handful of device pixels: OO is tall/round, EE broad/flat. */
+    anchors: [[0.24,0.52],[0.36,0.60],[0.50,0.64],[0.62,0.34],[0.72,0.16]],
+    mc: [0.80,0.56], mbf: 0.20, mouthBottom: 0.670,
+    pickerXScale: 1.45, mouthWidthGain: 1.9,
     /* The whole fish, not a head crop: it is a profile creature and the tail is
      * half of what makes it a fish. The head-only box cut it off, which reads
      * as a clipped drawing rather than as a close-up. */
-    crop: [0.00,0.14,1.00,0.92], cropFull: [0.00,0.02,1.00,0.98],
+    crop: [0.00,0.14,1.00,0.92], picker: [-0.03,0.00,1.03,0.99], cropFull: [0.00,0.02,1.00,0.98],
+    portrait: [0.00,0.02,1.00,0.98],
     head(u, d) {
+        /* Tail behind everything. */
+        if (d >= 1) {
+            tri(u, 0.24, 0.50, 0.02, 0.26, 0.11, 0.50);
+            tri(u, 0.24, 0.50, 0.02, 0.76, 0.11, 0.50);
+        }
+        /* Body contour, then opaque foreground fins. */
         quad(u, 0.16, 0.50, 0.50, 0.20, 0.88, 0.56);      /* back */
         quad(u, 0.88, 0.56, 0.48, 0.90, 0.16, 0.50);      /* belly */
-        if (d >= 1) {
-            tri(u, 0.24, 0.50, 0.02, 0.26, 0.11, 0.50);   /* tail, upper lobe */
-            tri(u, 0.24, 0.50, 0.02, 0.76, 0.11, 0.50);   /* tail, lower lobe */
-        }
         if (d >= 2) {
-            quad(u, 0.38, 0.30, 0.50, 0.08, 0.62, 0.28);  /* dorsal */
-            quad(u, 0.50, 0.62, 0.44, 0.86, 0.40, 0.64);  /* pectoral */
+            /* The dorsal base follows the back curve at both ends; its old
+             * left endpoint sat above the body and made the oversized fin
+             * float. The pectoral base likewise sits on the belly contour. */
+            /* Opaque interior plus two outer edges: omit the third edge so the
+             * fin opens directly into the body instead of gaining a baseline. */
+            tri(u, 0.405, 0.345, 0.495, 0.155, 0.585, 0.315, 0);
+            uline(u, 0.405, 0.345, 0.495, 0.155);
+            uline(u, 0.495, 0.155, 0.585, 0.315);
+            triSolid(u, 0.390, 0.700, 0.430, 0.810, 0.520, 0.720); /* pectoral */
+
+            /* Angler stalk and lure belong at the FRONT of a right-facing
+             * fish, and are drawn last so both occlude the body contour. */
+            quad(u, 0.65, 0.27, 0.78, 0.04, 0.90, 0.16);
+            quad(u, 0.90, 0.16, 0.98, 0.22, 0.94, 0.31);
+            ellipseSolid(u, 0.94, 0.32, 0.035, 0.035);
         }
         /* The puckered lip ring frames the aperture, so it is never dropped —
          * without it the mouth reads as a hole in a blob. */
-        ellipse(u, 0.80, 0.56, 0.085, 0.085, false, 1);
+        ellipse(u, 0.80, 0.56, 0.145, 0.115, false, 1);
     },
     eyes(u, shut, d) {
         if (shut) { uline(u, 0.525, 0.38, 0.675, 0.38, 1); return; }
-        ellipse(u, 0.60, 0.38, 0.075, 0.075, false, 1);
-        ellipse(u, 0.60, 0.38, 0.030, 0.030, true, 1);
+        /* White eyeball over the body, with a black pupil: genuinely opaque
+         * rather than another transparent ring. */
+        ellipse(u, 0.60, 0.38, 0.075, 0.075, true, 1);
+        ellipse(u, 0.60, 0.38, 0.026, 0.026, true, 0);
     },
 },
 {
     id: "unicorn", name: "Unicorn",
     anchors: [[0.20,0.10],[0.34,0.16],[0.46,0.20],[0.54,0.15],[0.58,0.09]],
-    mc: [0.5,0.60], mbf: 0.26,
-    crop: [0.22,-0.08,0.78,0.68], cropFull: [0.02,-0.10,0.98,1.00],
+    mc: [0.5,0.60], mbf: 0.26, pickerXScale: 1.20,
+    crop: [0.22,-0.08,0.78,0.72], picker: [0.16,-0.15,0.84,0.76], cropFull: [0.02,-0.10,0.98,1.00],
+    portrait: [0.12,-0.10,0.88,0.72],
     head(u, d) {
+        if (d >= 2) {
+            /* Torso only. The mane is intentionally omitted: neither loose
+             * strands nor a solid slab read cleanly on this display. */
+            uline(u, 0.40, 0.457, 0.30, 0.55); uline(u, 0.60, 0.457, 0.70, 0.55);
+            uline(u, 0.30, 0.55, 0.14, 0.99); uline(u, 0.70, 0.55, 0.86, 0.99);
+        }
         /* Ears and horn BEFORE the head, same reason as the monk's ears. The
          * horn is the character; it is drawn at every detail level. */
         /*
@@ -399,75 +459,72 @@ const FACES = [
             const cx = 0.5 + sd * 0.150;
             tri(u, cx - 0.055, 0.205, cx + 0.055, 0.205, cx + sd * 0.02, 0.045);
         }
-        tri(u, 0.474, 0.170, 0.526, 0.170, 0.505, -0.115);
+        tri(u, 0.474, 0.170, 0.526, 0.170, 0.500, -0.115);
         circleSolid(u, 0.5, 0.30, 0.185);
-        /* Spiral hints up the horn — three short diagonals, large sizes only. */
-        if (d >= 2) for (const t of [0.2, 0.42, 0.64]) {
-            const y = 0.156 + (-0.135 - 0.156) * t, w = 0.034 * (1 - t);
-            uline(u, 0.5 - w, y, 0.5 + w + 0.01, y - 0.012);
-        }
-        ellipseSolid(u, 0.5, 0.494, 0.135, 0.150);       /* muzzle */
+        /* The filled ears are behind the opaque head, but each gets a short
+         * foreground root so both joins survive integer rasterisation. */
+        uline(u, 0.35, 0.18, 0.37, 0.18);
+        uline(u, 0.65, 0.18, 0.63, 0.18);
+        ellipseSolid(u, 0.5, 0.500, 0.120, 0.200);       /* long horse snout */
         if (d >= 1) for (const nx of [0.468, 0.532]) ellipse(u, nx, 0.520, 0.011, 0.011, true, 1);
-        if (d < 2) return;
-        /* The mane, three strands down the LEFT side only. */
-        /* Rooted ON the head's left EDGE and bowed further left, never across
-         * it. The Swift roots them at fx 0.34-0.40, which is inside the head
-         * circle — harmless when the head is a filled cream disc, but on 1-bit
-         * outline art a strand starting inside the outline draws a line across
-         * the face. Same curve, moved off the silhouette. */
-        const mane = [[0.335,0.185,0.06,0.46],[0.315,0.28,0.10,0.62],[0.345,0.375,0.14,0.80]];
-        for (const m of mane) quad(u, m[0], m[1], m[2] - 0.02, (m[1] + m[3]) / 2, m[2], m[3]);
-        uline(u, 0.40, 0.457, 0.30, 0.55); uline(u, 0.60, 0.457, 0.70, 0.55);
-        uline(u, 0.30, 0.55, 0.14, 0.99); uline(u, 0.70, 0.55, 0.86, 0.99);
     },
-    eyes(u, shut, d) { roundEyes(u, [0.425, 0.575], 0.29, 0.048, 0.62, shut); },
+    eyes(u, shut, d) { solidEyes(u, [0.425, 0.575], 0.29, 0.025, 0.030, shut); },
 },
 {
     id: "girl", name: "Little Girl",
     /* The head-to-body ratio IS the identity: r 0.115 against the monk's 0.17. */
     anchors: [[0.10,0.16],[0.16,0.20],[0.22,0.15],[0.26,0.10],[0.30,0.06]],
-    mc: [0.5,0.255], mbf: 0.30,
-    crop: [0.23,0.03,0.77,0.34], cropFull: [0.02,0.02,0.98,1.00],
+    mc: [0.5,0.255], mbf: 0.22,
+    crop: [0.23,0.03,0.77,0.34], picker: [0.18,-0.02,0.82,0.39], cropFull: [0.02,0.02,0.98,1.00],
+    portrait: [0.18,0.00,0.82,0.66],
     head(u, d) {
-        /* Bigger, and clear of the head so the opaque head does not eat a
-         * sliver and leave them looking like parentheses. */
+        if (d >= 2) {
+            uline(u, 0.455, 0.298, 0.455, 0.34); uline(u, 0.545, 0.298, 0.545, 0.34);
+            quad(u, 0.455, 0.34, 0.22, 0.62, 0.08, 0.99);
+            quad(u, 0.545, 0.34, 0.78, 0.62, 0.92, 0.99);
+            uline(u, 0.08, 0.99, 0.92, 0.99);
+            uline(u, 0.10, 0.92, 0.90, 0.92);
+        }
         /*
-         * HEAD FIRST, THEN THE BUNS ON TOP.
+         * PIGTAIL MASSES FIRST, THEN THE HEAD.
          *
-         * Drawn underneath, the opaque head ate their inner halves and what
-         * survived were two thin crescents either side -- they read as
-         * parentheses around a face, not as hair. Drawn over it, each is a
-         * whole circle overlapping the head, which is what a bun looks like.
-         * Opaque, so the head's own outline does not run through them.
+         * Hollow circles read as mouse ears at this resolution. Compact filled
+         * teardrops create deliberate pixel clusters; the opaque head trims
+         * their inner edges into a clear behind-the-head layer.
          */
+        for (const cx of [0.35, 0.65])
+            ellipse(u, cx, 0.245, 0.075, 0.115, true, 1);
         circleSolid(u, 0.5, 0.20, 0.115);
-        for (const cx of [0.345, 0.655]) {
-            circleSolid(u, cx, 0.200, 0.085);
-            if (d >= 2) uline(u, cx, 0.200 + 0.085 * 0.9,
-                              cx - (cx < 0.5 ? 0.02 : -0.02), 0.200 + 0.085 * 2.0);
+        if (d >= 1) for (const cx of [0.35, 0.65]) {
+            ellipse(u, 0.5 + (cx - 0.5) * 0.83, 0.215,
+                    0.018, 0.018, true, 1);               /* hair ties */
+            uline(u, cx - 0.045, 0.27, cx + 0.045, 0.27, 0);
         }
-        /* Bangs: the arc across the brow plus the crown peak. */
-        quad(u, 0.4004, 0.1425, 0.5, 0.163, 0.5996, 0.1425);
-        if (d >= 1) {
-            quad(u, 0.4004, 0.1425, 0.454, 0.033, 0.5, 0.0678);
-            quad(u, 0.5, 0.0678, 0.546, 0.033, 0.5996, 0.1425);
-        }
-        if (d < 2) return;
-        uline(u, 0.455, 0.298, 0.455, 0.34); uline(u, 0.545, 0.298, 0.545, 0.34);
-        quad(u, 0.455, 0.34, 0.22, 0.62, 0.08, 0.99);   /* the dress cone */
-        quad(u, 0.545, 0.34, 0.78, 0.62, 0.92, 0.99);
-        uline(u, 0.08, 0.99, 0.92, 0.99);
-        uline(u, 0.10, 0.92, 0.90, 0.92);               /* hem trim */
-        uline(u, 0.445, 0.40, 0.26, 0.46); uline(u, 0.555, 0.40, 0.74, 0.46);
+        /* Filled bangs match the pigtail masses: a round cap with three small
+         * fringe points, not loose wires or horn-like peaks. */
+        ellipse(u, 0.5, 0.112, 0.108, 0.072, true, 1);
+        for (const cx of [0.435, 0.5, 0.565])
+            tri(u, cx - 0.030, 0.130, cx + 0.030, 0.130, cx, 0.166);
     },
-    eyes(u, shut, d) { roundEyes(u, [0.455, 0.545], 0.20, 0.03, 0.68, shut); },
+    eyes(u, shut, d) { arcEyes(u, [0.445, 0.555], 0.180, 0.026, [0.016,0.006], shut); },
 },
 {
     id: "oldman", name: "Old Man",
     anchors: [[0.14,0.16],[0.22,0.20],[0.30,0.15],[0.36,0.10],[0.40,0.06]],
     mc: [0.5,0.40], mbf: 0.24,
-    crop: [0.25,0.10,0.75,0.68], cropFull: [0.02,0.08,0.98,1.00],
+    crop: [0.25,0.10,0.75,0.68], picker: [0.20,0.05,0.80,0.70], cropFull: [0.02,0.08,0.98,1.00],
+    portrait: [0.16,0.06,0.84,0.74],
     head(u, d) {
+        if (d >= 2) {
+            quad(u, 0.28, 0.52, 0.18, 0.70, 0.06, 0.99);
+            quad(u, 0.72, 0.52, 0.82, 0.70, 0.94, 0.99);
+            /* Close the jacket's top edge into the beard instead of leaving
+             * two shoulder strokes floating beside it. */
+            quad(u, 0.28, 0.52, 0.34, 0.53, 0.390, 0.585);
+            quad(u, 0.610, 0.585, 0.66, 0.53, 0.72, 0.52);
+            uline(u, 0.06, 0.99, 0.94, 0.99);
+            uline(u, 0.5, 0.60, 0.5, 0.99);
+        }
         if (d >= 1) for (const cx of [0.3383, 0.6617]) ellipse(u, cx, 0.30, 0.021, 0.035, false, 1);
         circleSolid(u, 0.5, 0.30, 0.165);
         /* Side tufts, which bulge PAST the silhouette — that overhang is what
@@ -476,16 +533,13 @@ const FACES = [
             const bx = 0.5 + s * 0.1617, tx = 0.5 + s * 0.1452;
             quad(u, bx, 0.308, 0.5 + s * 0.2228, 0.280, tx, 0.237);
         }
-        /* The beard covers the lower face and the mouth opens inside it. */
+        /* The beard is an opaque foreground part: clear its interior before
+         * outlining it so the cardigan and neck cannot show through. */
+        tri(u, 0.3383, 0.308, 0.6617, 0.308, 0.5, 0.638, 0);
         quad(u, 0.3383, 0.308, 0.3845, 0.614, 0.5, 0.638);
         quad(u, 0.5, 0.638, 0.6155, 0.614, 0.6617, 0.308);
         if (d >= 2) for (const w of [[0.201,0.0825],[0.181,0.0693],[0.160,0.0462]])
             quad(u, 0.5 - w[1], w[0], 0.5, w[0] - 0.012, 0.5 + w[1], w[0]);
-        if (d < 2) return;
-        quad(u, 0.28, 0.52, 0.18, 0.70, 0.06, 0.99);
-        quad(u, 0.72, 0.52, 0.82, 0.70, 0.94, 0.99);
-        uline(u, 0.06, 0.99, 0.94, 0.99);
-        uline(u, 0.5, 0.68, 0.5, 0.99);                  /* cardigan zip */
     },
     eyes(u, shut, d) {
         /* Wider and set a touch lower than the rig, so the eye is separable
@@ -503,8 +557,16 @@ const FACES = [
     id: "cow", name: "Cow",
     anchors: [[0.18,0.08],[0.30,0.14],[0.42,0.20],[0.50,0.13],[0.56,0.07]],
     mc: [0.5,0.60], mbf: 0.34,
-    crop: [0.10,-0.02,0.90,0.74], cropFull: [0.02,-0.02,0.98,1.00],
+    crop: [0.10,-0.02,0.90,0.74], picker: [0.05,-0.07,0.95,0.78], cropFull: [0.02,-0.02,0.98,1.00],
+    portrait: [0.08,-0.02,0.92,0.76],
     head(u, d) {
+        if (d >= 2) {
+            quad(u, 0.22, 0.64, 0.12, 0.80, 0.05, 0.99);
+            quad(u, 0.78, 0.64, 0.88, 0.80, 0.95, 0.99);
+            quad(u, 0.22, 0.64, 0.31, 0.61, 0.38, 0.62);
+            quad(u, 0.62, 0.62, 0.69, 0.61, 0.78, 0.64);
+            uline(u, 0.05, 0.99, 0.95, 0.99);
+        }
         /* Ears and horns before the head. Both are identity cues, so both
          * survive to detail 0. */
         for (const s of [-1, 1]) {
@@ -515,19 +577,17 @@ const FACES = [
                    0.5 + s * 0.1254, 0.004);
         }
         circleSolid(u, 0.5, 0.27, 0.19);
-        ellipseSolid(u, 0.5, 0.540, 0.19, 0.15);         /* the big muzzle */
-        if (d >= 1) for (const nx of [0.425, 0.575]) ellipse(u, nx, 0.522, 0.018, 0.013, true, 1);
         /* The dark patch over one eye, as an outline — a filled patch at 1 bit
          * would swallow the eye it is supposed to sit around. */
         if (d >= 2) {
-            quad(u, 0.30, 0.20, 0.33, 0.09, 0.46, 0.11);
-            quad(u, 0.46, 0.11, 0.49, 0.24, 0.42, 0.33);
-            quad(u, 0.42, 0.33, 0.33, 0.31, 0.30, 0.20);
+            /* Kept inside the head boundary; the old x=.30 point escaped the
+             * circle and made the patch look like a crack in the silhouette. */
+            quad(u, 0.335, 0.20, 0.36, 0.115, 0.455, 0.13);
+            quad(u, 0.455, 0.13, 0.475, 0.235, 0.415, 0.325);
+            quad(u, 0.415, 0.325, 0.35, 0.30, 0.335, 0.20);
         }
-        if (d < 2) return;
-        quad(u, 0.22, 0.64, 0.12, 0.80, 0.05, 0.99);
-        quad(u, 0.78, 0.64, 0.88, 0.80, 0.95, 0.99);
-        uline(u, 0.05, 0.99, 0.95, 0.99);
+        ellipseSolid(u, 0.5, 0.540, 0.19, 0.15);         /* the big muzzle */
+        if (d >= 1) for (const nx of [0.425, 0.575]) ellipse(u, nx, 0.522, 0.018, 0.013, true, 1);
     },
     eyes(u, shut, d) { roundEyes(u, [0.425, 0.575], 0.26, 0.044, 0.62, shut); },
 },
@@ -542,32 +602,39 @@ const FACES = [
      */
     anchors: [[0.20,0.14],[0.32,0.24],[0.44,0.34],[0.52,0.40],[0.58,0.44]],
     mc: [0.5,0.565], mbf: 0.21,
-    crop: [0.26,0.09,0.74,0.70], cropFull: [0.02,0.08,0.98,1.00],
+    crop: [0.26,0.09,0.74,0.70], picker: [0.19,0.04,0.81,0.74], cropFull: [0.02,0.08,0.98,1.00],
+    portrait: [0.16,0.06,0.84,0.76],
     head(u, d) {
-        /* Long drooping ears past the jawline — the dog cue, kept at detail 0. */
-        for (const s of [-1, 1]) {
-            const rx = 0.5 + s * 0.170;
-            quad(u, rx, 0.272, 0.5 + s * 0.26, 0.42, 0.5 + s * 0.198, 0.587);
-            quad(u, 0.5 + s * 0.198, 0.587, 0.5 + s * 0.135, 0.44, rx, 0.30);
+        if (d >= 2) {
+            quad(u, 0.24, 0.62, 0.14, 0.80, 0.06, 0.99);
+            quad(u, 0.76, 0.62, 0.86, 0.80, 0.94, 0.99);
+            quad(u, 0.24, 0.62, 0.32, 0.60, 0.40, 0.60);
+            quad(u, 0.60, 0.60, 0.68, 0.60, 0.76, 0.62);
+            uline(u, 0.06, 0.99, 0.94, 0.99);
         }
+        /* Filled drooping ears are the dog cue. Their old one-pixel contours
+         * were indistinguishable from long hair on the physical display. */
+        for (const cx of [0.31, 0.69])
+            ellipse(u, cx, 0.42, 0.075, 0.18, true, 1);
         circleSolid(u, 0.5, 0.30, 0.185);
+        if (d >= 1) for (const cx of [0.31, 0.69])
+            uline(u, cx, 0.34, cx, 0.49, 0);             /* inner ear split */
         ellipseSolid(u, 0.5, 0.522, 0.15, 0.13);                 /* snout */
         ellipse(u, 0.5, 0.522 - 0.13 * 0.28, 0.035, 0.026, true, 1); /* nose */
-        if (d < 2) return;
-        quad(u, 0.24, 0.62, 0.14, 0.80, 0.06, 0.99);
-        quad(u, 0.76, 0.62, 0.86, 0.80, 0.94, 0.99);
-        uline(u, 0.06, 0.99, 0.94, 0.99);
     },
     eyes(u, shut, d) { roundEyes(u, [0.43, 0.57], 0.28, 0.042, 0.60, shut); },
 },
 {
     id: "ghost", name: "Ghost",
-    anchors: [[0.30,0.30],[0.34,0.36],[0.36,0.38],[0.34,0.34],[0.30,0.28]],
-    mc: [0.5,0.56], mbf: 0.22,
+    /* The original near-circular anchors all rasterised to the same 4px dot.
+     * Give the sheet a clear OO-to-EE aspect-ratio change instead. */
+    anchors: [[0.22,0.48],[0.32,0.54],[0.44,0.58],[0.56,0.30],[0.66,0.14]],
+    mc: [0.5,0.56], mbf: 0.42,
     /* The hem runs to fy 0.94. Cropping at 0.76 kept only the tops of the five
      * scallops, which drew as a row of loose dots under the face -- read on
      * hardware as "ghost is weird", and it was: a ghost with no hem. */
-    crop: [0.04,0.02,0.96,0.97], cropFull: [0.02,0.01,0.98,0.99],
+    crop: [0.04,0.02,0.96,0.97], picker: [-0.03,-0.03,1.03,1.04], cropFull: [0.02,0.01,0.98,0.99],
+    portrait: [0.02,0.01,0.98,0.99],
     head(u, d) {
         /* One continuous sheet: no head/body split at all. */
         quad(u, 0.5, 0.04, 0.78, 0.02, 0.92, 0.20);
@@ -585,27 +652,42 @@ const FACES = [
     eyes(u, shut, d) { solidEyes(u, [0.40, 0.60], 0.34, 0.026, 0.034, shut); },
 },
 {
-    id: "firefighter", name: "Fire Fighter",
+    id: "firefighter", name: "Officer Eeoo",
     anchors: [[0.16,0.18],[0.26,0.26],[0.36,0.32],[0.44,0.24],[0.48,0.16]],
-    mc: [0.5,0.44], mbf: 0.25,
-    crop: [0.23,0.09,0.77,0.54], cropFull: [0.02,0.08,0.98,1.00],
+    mc: [0.5,0.44], mbf: 0.25, mouthBottom: 0.505,
+    crop: [0.23,0.09,0.77,0.54], picker: [0.17,0.03,0.83,0.60], cropFull: [0.02,0.08,0.98,1.00],
+    portrait: [0.14,0.06,0.86,0.76],
     head(u, d) {
+        if (d >= 2) {
+            uline(u, 0.425, 0.47, 0.425, 0.54); uline(u, 0.575, 0.47, 0.575, 0.54);
+            quad(u, 0.425, 0.54, 0.34, 0.53, 0.24, 0.62);
+            quad(u, 0.575, 0.54, 0.66, 0.53, 0.76, 0.62);
+            quad(u, 0.24, 0.62, 0.14, 0.80, 0.06, 0.99);
+            quad(u, 0.76, 0.62, 0.86, 0.80, 0.94, 0.99);
+            uline(u, 0.06, 0.99, 0.94, 0.99);
+            uline(u, 0.115, 0.78, 0.885, 0.78); uline(u, 0.10, 0.86, 0.90, 0.86);
+        }
         circleSolid(u, 0.5, 0.34, 0.165);
         /* The helmet is the character. Dome then brim, brim last so its flare
          * cuts across the dome the way the real silhouette does. Both opaque,
          * or the head's arc runs straight through the hat. */
         ellipseSolid(u, 0.5, 0.206, 0.175, 0.0809);
+        /* ellipse() plots the first crown row as separated edge pixels. Join
+         * those edges explicitly into one shallow, continuous helmet crown. */
+        quad(u, 0.435, 0.149, 0.5, 0.112, 0.565, 0.149);
         ellipse(u, 0.5, 0.287, 0.223, 0.0297, true, 1);
-        if (d >= 1) ellipse(u, 0.5, 0.129, 0.018, 0.018, true, 1);      /* knob */
-        if (d >= 2) ellipse(u, 0.5, 0.206, 0.045, 0.030, false, 0);     /* badge */
-        if (d < 2) return;
-        uline(u, 0.425, 0.489, 0.425, 0.52); uline(u, 0.575, 0.489, 0.575, 0.52);
-        quad(u, 0.24, 0.62, 0.14, 0.80, 0.06, 0.99);
-        quad(u, 0.76, 0.62, 0.86, 0.80, 0.94, 0.99);
-        uline(u, 0.06, 0.99, 0.94, 0.99);
-        /* Inset to the coat's own width at those heights; the Swift's 0.10-0.90
-         * band is inside a FILLED coat, and on outline art it hangs past it. */
-        uline(u, 0.115, 0.78, 0.885, 0.78); uline(u, 0.10, 0.86, 0.90, 0.86);
+        if (d >= 1) {
+            ellipse(u, 0.5, 0.129, 0.018, 0.018, true, 1);      /* knob */
+            uline(u, 0.5, 0.129, 0.5, 0.158);                  /* joined topper */
+            uline(u, 0.35, 0.257, 0.35, 0.287);                /* dome to brim */
+            uline(u, 0.65, 0.257, 0.65, 0.287);
+        }
+        if (d >= 2) {
+            /* White helmet shield: the previous black outline was literally
+             * invisible on the already-cleared dome interior. */
+            ellipse(u, 0.5, 0.206, 0.045, 0.030, false, 1);
+            uline(u, 0.5, 0.184, 0.5, 0.228);
+        }
     },
     eyes(u, shut, d) {
         /* NOTE the fy: 0.34 + 0.01. This is the one character whose eye offset
@@ -617,25 +699,34 @@ const FACES = [
     id: "punk", name: "Punk",
     anchors: [[0.18,0.12],[0.28,0.10],[0.36,0.08],[0.42,0.14],[0.46,0.20]],
     mc: [0.5,0.42], mbf: 0.24,
-    crop: [0.30,-0.05,0.70,0.52], cropFull: [0.02,-0.05,0.98,1.00],
+    crop: [0.30,-0.05,0.70,0.52], picker: [0.23,-0.10,0.77,0.58], cropFull: [0.02,-0.05,0.98,1.00],
+    portrait: [0.19,-0.05,0.81,0.72],
     head(u, d) {
-        /* Spikes first, then an opaque head over their roots. */
-        /* Taller and wider than the rig's own numbers: at page size the
-         * original spikes were a wisp above a blob, and the mohawk IS the
-         * character. Drawn before the head so it occludes their roots. */
-        const punkSpikes = [[0.395,0.115],[0.448,0.035],[0.500,-0.030],[0.552,0.035],[0.605,0.115]];
-        for (const sp of punkSpikes) tri(u, sp[0] - 0.032, 0.215, sp[0] + 0.032, 0.215, sp[0], sp[1]);
+        if (d >= 2) {
+            /* The original leather jacket: broad shoulders step up to a flat
+             * collar around a constant-width neck instead of floating below. */
+            uline(u, 0.418, 0.44, 0.418, 0.50); uline(u, 0.582, 0.44, 0.582, 0.50);
+            quad(u, 0.26, 0.56, 0.16, 0.78, 0.06, 0.99);
+            uline(u, 0.06, 0.99, 0.94, 0.99);
+            quad(u, 0.94, 0.99, 0.84, 0.78, 0.74, 0.56);
+            quad(u, 0.74, 0.56, 0.62, 0.50, 0.582, 0.50);
+            uline(u, 0.582, 0.50, 0.418, 0.50);
+            quad(u, 0.418, 0.50, 0.38, 0.50, 0.26, 0.56);
+            /* Studs sit inside the jacket shoulders, never beyond the seams. */
+            for (const sx of [0.29, 0.37, 0.63, 0.71])
+                tri(u, sx - 0.018, 0.625, sx + 0.018, 0.625, sx, 0.602);
+        }
         circleSolid(u, 0.5, 0.335, 0.145);
-        /* (the spikes are drawn above, before the head, so it occludes their
-         * roots -- the dominant cue, never gated on detail) */
+        /* A narrow, connected crest rather than loose hairs across the whole
+         * skull. It is drawn over the scalp so its filled base physically
+         * joins the head outline instead of being cleared away behind it. */
+        const punkSpikes = [[0.480,0.040],[0.500,-0.040],[0.520,0.040]];
+        for (const sp of punkSpikes)
+            tri(u, sp[0] - 0.025, 0.205, sp[0] + 0.025, 0.205, sp[0], sp[1]);
         if (d >= 2) {
             ellipse(u, 0.6275, 0.3725, 0.02, 0.02, false, 1);   /* safety pin */
-            uline(u, 0.425, 0.4475, 0.425, 0.50); uline(u, 0.575, 0.4475, 0.575, 0.50);
-            quad(u, 0.26, 0.56, 0.16, 0.78, 0.06, 0.99);
-            quad(u, 0.74, 0.56, 0.84, 0.78, 0.94, 0.99);
-            uline(u, 0.06, 0.99, 0.94, 0.99);
-            for (const sx of [0.20, 0.32, 0.68, 0.80])       /* jacket studs */
-                tri(u, sx - 0.022, 0.60, sx + 0.022, 0.60, sx, 0.578);
+            uline(u, 0.418, 0.50, 0.50, 0.66);             /* jacket lapels */
+            uline(u, 0.582, 0.50, 0.50, 0.66);
         }
     },
     eyes(u, shut, d) { flickEyes(u, [0.425, 0.575], 0.31, 0.034, [0.022, 0.004], shut); },
@@ -645,28 +736,52 @@ const FACES = [
     /* Not humanoid: the silhouette IS a slice, point-DOWN. No head circle. */
     anchors: [[0.24,0.10],[0.36,0.20],[0.46,0.30],[0.52,0.22],[0.56,0.14]],
     mc: [0.5,0.56], mbf: 0.26,
-    crop: [0.04,0.02,0.96,0.86], cropFull: [0.01,0.00,0.99,1.00],
+    crop: [0.04,0.02,0.96,0.86], picker: [-0.03,-0.03,1.03,1.04], cropFull: [0.01,0.00,0.99,1.00],
+    portrait: [0.01,0.00,0.99,1.00],
     head(u, d) {
         quad(u, 0.5, 0.97, 0.20, 0.68, 0.09, 0.16);
         quad(u, 0.09, 0.16, 0.5, 0.06, 0.91, 0.16);
         quad(u, 0.91, 0.16, 0.80, 0.68, 0.5, 0.97);
         if (d >= 1) quad(u, 0.09, 0.24, 0.5, 0.14, 0.91, 0.24);   /* crust line */
-        if (d >= 2) for (const p of [[0.26,0.46,0.075],[0.74,0.42,0.065],[0.50,0.80,0.075]])
+        /* Outline-only pepperoni, distributed around rather than underneath
+         * the face, and inset far enough to belong unmistakably to the slice. */
+        if (d >= 2) for (const p of [[0.28,0.31,0.052],[0.72,0.34,0.052],
+                                    [0.29,0.72,0.057],[0.71,0.72,0.057]])
             ellipse(u, p[0], p[1], p[2], p[2], false, 1);
+        if (d >= 2) {
+            /* Clip the lower toppings with opaque exterior wedges, then draw
+             * the real curved slice edges back over the cut circles. */
+            tri(u, 0.00, 0.54, 0.15, 0.54, 0.50, 0.97, 0);
+            tri(u, 0.00, 0.54, 0.50, 0.97, 0.00, 1.00, 0);
+            tri(u, 1.00, 0.54, 0.85, 0.54, 0.50, 0.97, 0);
+            tri(u, 1.00, 0.54, 0.50, 0.97, 1.00, 1.00, 0);
+            quad(u, 0.5, 0.97, 0.20, 0.68, 0.09, 0.16);
+            quad(u, 0.91, 0.16, 0.80, 0.68, 0.5, 0.97);
+        }
     },
-    eyes(u, shut, d) { roundEyes(u, [0.40, 0.60], 0.40, 0.042, 0.55, shut); },
+    eyes(u, shut, d) { solidEyes(u, [0.40, 0.60], 0.40, 0.025, 0.028, shut); },
 },
 {
     id: "cat", name: "Cat",
-    anchors: [[0.08,0.10],[0.14,0.14],[0.20,0.10],[0.24,0.06],[0.28,0.04]],
-    mc: [0.5,0.400], mbf: 0.20,
-    crop: [0.24,-0.05,0.76,0.46], cropFull: [0.02,-0.05,0.98,1.00],
+    anchors: [[0.08,0.10],[0.14,0.14],[0.20,0.12],[0.24,0.09],[0.28,0.08]],
+    mc: [0.5,0.400], mbf: 0.20, mouthScaleGain: 1.5,
+    crop: [0.24,-0.05,0.76,0.46], picker: [0.18,-0.08,0.82,0.53], cropFull: [0.02,-0.05,0.98,1.00],
+    portrait: [0.16,-0.05,0.84,0.70],
     head(u, d) {
+        if (d >= 2) {
+            uline(u, 0.405, 0.44, 0.405, 0.60); uline(u, 0.595, 0.44, 0.595, 0.60);
+            quad(u, 0.405, 0.60, 0.30, 0.78, 0.24, 0.99);
+            quad(u, 0.595, 0.60, 0.70, 0.78, 0.76, 0.99);
+            uline(u, 0.24, 0.99, 0.76, 0.99);
+            quad(u, 0.74, 0.88, 0.99, 0.55, 0.88, 0.42);
+        }
         /* Big triangular ears, set wide: at page size the original pair were
          * small and sat inside the head's own outline, so the silhouette said
          * nothing. They are the cat cue and now read from across the room. */
         for (const sd of [-1, 1]) {
-            tri(u, 0.5 + sd * 0.040, 0.255, 0.5 + sd * 0.205, 0.255, 0.5 + sd * 0.135, -0.030);
+            triOutline(u, 0.5 + sd * 0.040, 0.255,
+                       0.5 + sd * 0.205, 0.255,
+                       0.5 + sd * 0.135, -0.030);
         }
         circleSolid(u, 0.5, 0.28, 0.175);
         /* Muzzle lower and wider, nose lifted onto the head above it: at page
@@ -679,11 +794,6 @@ const FACES = [
              * outline and turned the lower face into hatching. */
             for (const sd of [-1, 1]) for (const dy of [-0.022, 0.022])
                 uline(u, 0.5 + sd * 0.115, 0.372 + dy * 0.5, 0.5 + sd * 0.245, 0.372 + dy);
-            uline(u, 0.405, 0.455, 0.405, 0.60); uline(u, 0.595, 0.455, 0.595, 0.60);
-            quad(u, 0.405, 0.60, 0.30, 0.78, 0.24, 0.99);
-            quad(u, 0.595, 0.60, 0.70, 0.78, 0.76, 0.99);
-            uline(u, 0.24, 0.99, 0.76, 0.99);
-            quad(u, 0.74, 0.88, 0.99, 0.55, 0.88, 0.42); /* the tail */
         }
     },
     eyes(u, shut, d) { almondEyes(u, [0.44, 0.56], 0.27, 0.052, 0.036, shut); },
@@ -742,34 +852,40 @@ function mouthShape(face, v) {
 function drawMouth(u, face, vowel, boost, minPx) {
     const [w, h] = mouthShape(face, quantisedVowel(vowel));
     const b = boost || 1;
-    /*
-     * THE GAIN IS ON HEIGHT ONLY.
-     *
-     * Applied to both axes it swallowed the muzzles: at EH the dog's aperture
-     * reached 93% of its snout, so the snout read as a solid white blob rather
-     * than as a mouth inside a nose. Width was never the problem -- the anchors
-     * are wide by design and it is the axis that carries the OO..EE morph.
-     * Height is what vanishes at this scale, so height is what is scaled.
-     */
-    let rw = w * face.mbf * 0.5;
+    /* Scale both axes together. The portrait and the mouth-only Vowel widget
+     * must show the same aperture shape; only their overall size may differ. */
+    let rw = w * face.mbf * 0.5 * b * (face.mouthWidthGain || 1);
     let rh = h * face.mbf * 0.5 * b;
 
     /*
      * A PIXEL FLOOR, because some characters are flat by design.
      *
-     * Punk, Cat and Unicorn have mouth anchors barely a tenth of a unit tall --
-     * a slot rather than an aperture, which is right on a phone and vanishes on
-     * a 40px head. Gain alone cannot rescue them: scaling a very flat ellipse
-     * keeps it flat. So the drawn HEIGHT is floored in pixels, which is the
-     * unit that actually decides whether a thing is visible.
-     *
-     * Width is never floored: it is the axis that carries the OO..EE morph on
-     * exactly those characters, and clamping it would flatten the animation to
-     * hold the shape.
+     * Apply the floor as a uniform scale based on the larger radius. Flooring
+     * height alone turned flat EE mouths into round dots in portraits.
      */
     if (minPx > 0) {
         const minR = (minPx * 0.5) / u.s;
-        if (rh < minR) rh = minR;
+        const largest = Math.max(rw, rh);
+        if (largest > 0 && largest < minR) {
+            const floorScale = minR / largest;
+            rw *= floorScale;
+            rh *= floorScale;
+        }
+    }
+
+    /* Keep the aperture visually inside its enclosing jaw/lip. At one bit a
+     * white mouth touching a white outline does not look "open"; it erases the
+     * intervening black and makes the chin look severed. One dark device pixel
+     * is enough to preserve the foreground/background relationship. */
+    if (minPx > 0 && Number.isFinite(face.mouthBottom)) {
+        /* Two mapper pixels guarantee one dark raster row after rounding both
+         * the aperture and its enclosing outline. */
+        const maxR = face.mouthBottom - face.mc[1] - 2 / u.s;
+        if (maxR > 0 && rh > maxR) {
+            const fitScale = maxR / rh;
+            rw *= fitScale;
+            rh *= fitScale;
+        }
     }
 
     ellipse(u, face.mc[0], face.mc[1], rw, rh, true, 1);
@@ -852,14 +968,16 @@ function faceFrom(v) {
 }
 
 /* Head + eyes + mouth, at one detail level, in one crop. */
-function paintFace(rawCtx, face, crop, vowel, amp, nowMs) {
-    const u = unit(rawCtx, crop);
-    const d = faceDetail(rawCtx);
+function paintFace(rawCtx, face, crop, vowel, amp, nowMs, detailOverride, xScaleOverride) {
+    const u = unit(rawCtx, crop, xScaleOverride);
+    const d = detailOverride === undefined ? faceDetail(rawCtx) : detailOverride;
     face.head(u, d);
     face.eyes(u, blinking(nowMs), d);
     /* 4px is the floor at which a filled aperture reads as a mouth rather than
      * as a stray line, measured against these faces at 40px. */
-    drawMouth(u, face, vowel, ampBoost(amp) * FACE_MOUTH_GAIN, d >= 1 ? 4 : 0);
+    drawMouth(u, face, vowel,
+              ampBoost(amp) * FACE_MOUTH_GAIN * (face.mouthScaleGain || 1),
+              d >= 1 ? 4 : 0);
 }
 
 /* ==========================================================================
@@ -910,7 +1028,7 @@ function mouthCrop(face) {
         if (a[0] > mw) mw = a[0];
         if (a[1] > mh) mh = a[1];
     }
-    const rw = mw * face.mbf * 0.62;
+    const rw = mw * face.mbf * 0.62 * (face.mouthWidthGain || 1);
     const rh = mh * face.mbf * 0.62;
     return [face.mc[0] - rw, face.mc[1] - rh, face.mc[0] + rw, face.mc[1] + rh];
 }
@@ -1005,8 +1123,8 @@ globalThis.canvas_overlay = {
     /* ======================================================================
      * SURFACE 4 — the fullscreen face, and the character picker
      *
-     * Reached by clicking `big_face`. This is the one surface with room for the
-     * whole character, so it is also where you CHOOSE one: the jog steps the
+     * Reached by clicking `big_face`. This surface has room for a composed
+     * portrait, so it is also where you CHOOSE one: the jog steps the
      * preset, which loads that character's voice and face together.
      *
      * WHAT ANIMATES AND WHAT DOES NOT, and why that is not a compromise.
@@ -1089,7 +1207,10 @@ globalThis.canvas_overlay = {
          * changes.
          */
         const label = vowelName(v);
-        const nm = String((preset && preset.name) || face.name);
+        /* Index selected `face` above, so its table entry is also the only
+         * authoritative name. The host name is an asynchronous IPC read and
+         * has appeared on hardware as both "?" and a stray non-ASCII glyph. */
+        const nm = face.name;
         const pos = preset && preset.count
             ? `${(preset.index || 0) + 1}/${preset.count}` : "";
 
@@ -1098,7 +1219,7 @@ globalThis.canvas_overlay = {
          *
          * It used to sit in a right-hand column whose width was computed from
          * the text, with the face given whatever was left. On hardware that
-         * produced "hter" and "irl" -- Fire Fighter and Little Girl with their
+         * produced "hter" and "irl" -- Officer Eeoo and Little Girl with their
          * first halves lost in the face's own lines. Not truncation (frameCtx
          * clips from the END and refuses a negative x): the drawing and the
          * label were simply sharing pixels, and only the part clear of the face
@@ -1117,7 +1238,12 @@ globalThis.canvas_overlay = {
         const rw = Math.max(c.textWidth(label), c.textWidth(pos));
         const faceW = Math.max(16, w - rw - 6);
 
-        paintFace(subFrame(c, 0, 0, faceW, faceH), face, face.crop, v, 0, nowMs || 0);
+        /* Scale each character to its tight picker crop, but force panel-level
+         * construction detail. That keeps the face large in this short band
+         * without bringing back the disconnected/transparent simplified art. */
+        paintFace(subFrame(c, 0, 0, faceW, faceH),
+                  face, face.picker || face.crop,
+                  v, 0, nowMs || 0, 2, face.pickerXScale || 1);
 
         c.print(w - c.textWidth(label), 1, label, 1);
         if (pos) c.print(w - c.textWidth(pos), 11, pos, 1);
@@ -1164,7 +1290,7 @@ globalThis.canvas_overlay = {
          *
          * It started in a right-hand column and the render showed the obvious:
          * a 62% face leaves ~45px, which is seven characters, so "Little Girl"
-         * and "Fire Fighter" were cut to "Little G" and "Fire Fig" — the two
+         * and "Officer Eeoo" were cut to fragments — the two
          * names most in need of being read. The bottom strip is the full 128px
          * (21 characters), which fits every one of the twelve with room over.
          *
@@ -1175,7 +1301,8 @@ globalThis.canvas_overlay = {
         const faceW = Math.round(ctx.width * 0.58);
 
         paintFace(subFrame(ctx, 0, 0, faceW, bodyH),
-                  face, face.cropFull, st.vowel === undefined ? 0.5 : st.vowel,
+                  face, face.portrait || face.cropFull,
+                  st.vowel === undefined ? 0.5 : st.vowel,
                   st.amp || 0, ctx.now ? ctx.now() : 0);
 
         const x = faceW + 5;
@@ -1190,7 +1317,7 @@ globalThis.canvas_overlay = {
         /*
          * The jog hint goes on the caption strip, right-aligned, and only if it
          * genuinely fits beside the name — that the jog changes CHARACTER is
-         * not guessable, but a hint that collides with "Fire Fighter" is worse
+         * not guessable, but a hint that collides with "Officer Eeoo" is worse
          * than no hint. 21 characters across; the longest name is 12.
          */
         const hint = "jog:who";

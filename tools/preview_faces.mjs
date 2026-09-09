@@ -13,7 +13,11 @@
  * the real native drawing verbs) rather than reimplementing them, so what comes
  * out is what the panel would show.
  *
- *   node tools/preview_faces.mjs [--out faces.png] [--schwung ../schwung]
+ *   node tools/preview_faces.mjs [--out faces.png]
+ *       [--portraits-out portraits.png] [--pickers-out pickers.png]
+ *       [--pages-out picker-pages.png]
+ *       [--sweep-out picker-mouth-sweep.png]
+ *       [--schwung ../schwung]
  *
  * Node-only, dev-only. Nothing here ships.
  */
@@ -32,6 +36,14 @@ function arg(name, dflt) {
 
 const SCHWUNG = path.resolve(ROOT, arg("--schwung", "../schwung"));
 const OUT = path.resolve(ROOT, arg("--out", "faces-out/faces.png"));
+const portraitsArg = arg("--portraits-out", "");
+const PORTRAITS_OUT = portraitsArg ? path.resolve(ROOT, portraitsArg) : null;
+const pickersArg = arg("--pickers-out", "");
+const PICKERS_OUT = pickersArg ? path.resolve(ROOT, pickersArg) : null;
+const pagesArg = arg("--pages-out", "");
+const PAGES_OUT = pagesArg ? path.resolve(ROOT, pagesArg) : null;
+const sweepArg = arg("--sweep-out", "");
+const SWEEP_OUT = sweepArg ? path.resolve(ROOT, sweepArg) : null;
 
 const harnessPath = path.join(SCHWUNG, "tools", "param-pages", "harness.mjs");
 if (!fs.existsSync(harnessPath)) {
@@ -40,6 +52,10 @@ if (!fs.existsSync(harnessPath)) {
     process.exit(2);
 }
 const { createFramebuffer, drawContext } = await import(harnessPath);
+const { frameCtx } = await import(path.join(
+    SCHWUNG, "src", "shared", "param_pages", "frame_ctx.mjs"));
+const { drawHeader, drawFooter } = await import(path.join(
+    SCHWUNG, "src", "shared", "param_pages", "render_page_movy.mjs"));
 
 /*
  * RENDER THROUGH THE HOST'S OWN REGISTRATION PATH, not by calling drawCell.
@@ -174,11 +190,87 @@ const FULL_W = 128, FULL_H = 64;
 const SWEEP = [0.0, 0.25, 0.5, 0.75, 1.0];
 
 const rows = [];
+const portraitFrames = [];
+const pickerFrames = [];
+const pickerPageFrames = [];
+const pickerSweepRows = [];
 let clipped = 0, fullClipped = 0, missing = new Set();
+const portraitCropFailures = [];
+const portraitCueFailures = [];
+const pickerFailures = [];
+const fullSilhouette = new Set(["fish", "ghost", "pizza"]);
+
+function countRect(fb, x, y, w, h) {
+    let n = 0;
+    for (let yy = y; yy < y + h; yy++)
+        for (let xx = x; xx < x + w; xx++)
+            if (fb.pixels[yy * fb.width + xx]) n++;
+    return n;
+}
+
+function litBounds(fb, x, y, w, h) {
+    let x0 = x + w, y0 = y + h, x1 = x - 1, y1 = y - 1;
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
+        if (!fb.pixels[yy * fb.width + xx]) continue;
+        x0 = Math.min(x0, xx); y0 = Math.min(y0, yy);
+        x1 = Math.max(x1, xx); y1 = Math.max(y1, yy);
+    }
+    return x1 < x0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+function regionSignature(fb, x, y, w, h) {
+    let out = "";
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++)
+        out += fb.pixels[yy * fb.width + xx] ? "1" : "0";
+    return out;
+}
+
+function differingPixels(a, b) {
+    let n = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) n++;
+    return n;
+}
+
+/* Count 8-connected islands inside a review region. This catches a helmet
+ * crown that is geometrically one ellipse but rasterises as three loose pixel
+ * clusters at the top of the 1-bit panel. */
+function componentCountRect(fb, x, y, w, h) {
+    const lit = new Set();
+    for (let yy = y; yy < y + h; yy++)
+        for (let xx = x; xx < x + w; xx++)
+            if (fb.pixels[yy * fb.width + xx]) lit.add(`${xx},${yy}`);
+    let components = 0;
+    while (lit.size) {
+        components++;
+        const stack = [lit.values().next().value];
+        lit.delete(stack[0]);
+        while (stack.length) {
+            const [px, py] = stack.pop().split(",").map(Number);
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                if (!dx && !dy) continue;
+                const key = `${px + dx},${py + dy}`;
+                if (lit.delete(key)) stack.push(key);
+            }
+        }
+    }
+    return components;
+}
 
 for (let i = 0; i < faces.length; i++) {
     const f = faces[i];
     const row = [];
+
+    /*
+     * A fullscreen PORTRAIT needs its own composition. Reusing cropFull made
+     * most humanoid heads only 12-18 pixels high because an entire robe was
+     * fitted into the 55px drawing band. Fish, Ghost and Pizza are the three
+     * exceptions whose whole-body silhouette is their identity.
+     */
+    if (!Array.isArray(f.portrait) || f.portrait.length !== 4) {
+        portraitCropFailures.push(`${f.id}: no four-value portrait crop`);
+    } else if (!fullSilhouette.has(f.id) && f.portrait[3] - f.portrait[1] > 0.82) {
+        portraitCropFailures.push(`${f.id}: portrait crop is too loose to read at panel size`);
+    }
 
     /* No "Who" cell any more: a 17x15 head is an illegible blob, and it only
      * existed to carry `face` to the cell beside it, which extra_keys now does.
@@ -210,6 +302,231 @@ for (let i = 0; i < faces.length; i++) {
         s.ctx.state = { faceId: f.id, vowel: 0.5, amp: 0.6, name: f.name, preset: i, count: faces.length };
         overlay.draw(s.ctx);
         row.push(s.fb);
+        portraitFrames.push(s.fb);
+
+        /* Signature features must be PIXEL CLUSTERS, not one-pixel contours.
+         * These two side regions are where pigtails and drooping dog ears
+         * live in the final 74x55 portrait frame. Sparse contours read as
+         * mouse ears and long hair respectively on the physical display. */
+        if (f.id === "girl" || f.id === "dog") {
+            const left = countRect(s.fb, 17, 13, 13, 24);
+            const right = countRect(s.fb, 44, 13, 13, 24);
+            const need = f.id === "girl" ? 60 : 75;
+            if (left < need || right < need)
+                portraitCueFailures.push(`${f.id}: signature side clusters are too sparse (${left}/${right})`);
+        }
+        if (f.id === "firefighter") {
+            /* Stop above the shield: only the dome crown belongs here. */
+            const pieces = componentCountRect(s.fb, 28, 4, 19, 4);
+            if (pieces !== 1)
+                portraitCueFailures.push(`${f.id}: helmet crown breaks into ${pieces} pixel islands`);
+        }
+        if (f.id === "fish") {
+            if (countRect(s.fb, 32, 0, 12, 7) !== 0)
+                portraitCueFailures.push(`${f.id}: dorsal fin is too tall for the portrait grid`);
+            const baseSeam = countRect(s.fb, 35, 18, 8, 1);
+            /* Four pixels are the legitimate two side/body junctions; the
+             * former closed baseline filled all eight pixels in this row. */
+            if (baseSeam > 4)
+                portraitCueFailures.push(`${f.id}: dorsal fin has a closed base seam (${baseSeam} pixels)`);
+        }
+        if (f.id === "unicorn") {
+            const leftRoot = s.fb.pixels[19 * s.fb.width + 27];
+            const rightRoot = s.fb.pixels[19 * s.fb.width + 47];
+            if (!leftRoot || !rightRoot)
+                portraitCueFailures.push(`${f.id}: ear roots are not joined to the head`);
+        }
+        if (f.id === "punk") {
+            const crest = countRect(s.fb, 25, 0, 24, 17);
+            if (crest > 60)
+                portraitCueFailures.push(`${f.id}: mohawk is too wide (${crest} upper pixels)`);
+        }
+        if (f.id === "pizza") {
+            /* The two lower rings deliberately cross the slice boundary. They
+             * must be clipped to partial toppings, not rendered as complete
+             * circles dangling beside the outline. */
+            const lowerLeft = countRect(s.fb, 24, 35, 7, 7);
+            const lowerRight = countRect(s.fb, 45, 37, 7, 7);
+            /* A clipped half-ring plus the redrawn one-pixel slice edge uses
+             * at most 15 pixels here; the old complete rings used 22/16. */
+            if (lowerLeft > 15 || lowerRight > 15)
+                portraitCueFailures.push(`${f.id}: lower pepperoni are not edge-clipped (${lowerLeft}/${lowerRight})`);
+        }
+    }
+
+    /* The exact frame Schwung gives drawPage inside the preset picker. This
+     * path is intentionally separate from the 128x64 fullscreen portrait. */
+    {
+        const s = frameSurface(120, 45);
+        let pickerProbe = null;
+        const realHead = f.head;
+        f.head = (u, d) => {
+            pickerProbe = {
+                scale: u.s, detail: d, x0: u.x(0), y0: u.y(0),
+                xUnit: u.x(1) - u.x(0),
+            };
+            realHead(u, d);
+        };
+        overlay.drawPage(s.ctx, {
+            values: { face: f.id, vowel: 0.5 },
+            nowMs: 0,
+            /* The live framebuffer captured a one-glyph non-name here. The
+             * character table is authoritative once the index has resolved. */
+            preset: { name: "Ä", index: i, count: faces.length, entered: true },
+        });
+        f.head = realHead;
+        pickerFrames.push(s.fb);
+
+        /* Compare the entire reserved strip with a clean font render. Merely
+         * counting pixels let a portrait overdraw masquerade as a label. */
+        const expectedName = frameSurface(120, 45);
+        expectedName.ctx.print(0, 37, f.name, 1);
+        for (let y = 37; y < 45; y++) for (let x = 0; x < 120; x++) {
+            const p = y * 120 + x;
+            if (s.fb.pixels[p] !== expectedName.fb.pixels[p]) {
+                pickerFailures.push(`${f.id}: preset name row is incomplete or overdrawn`);
+                y = 45;
+                break;
+            }
+        }
+
+        /* The picker uses each character's tight crop so it fills the small
+         * frame, but retains panel detail so the corrected construction and
+         * foreground/background ordering do not regress to the old card art. */
+        if (!Array.isArray(f.picker) || f.picker.length !== 4)
+            pickerFailures.push(`${f.id}: no four-value picker crop`);
+        const pc = f.picker || f.crop;
+        const readingW = Math.max(s.ctx.textWidth("AH"), s.ctx.textWidth(`${i + 1}/12`));
+        const pickerFaceW = Math.max(16, 120 - readingW - 6);
+        const pickerXScale = f.pickerXScale || 1;
+        const pickerScale = Math.min(
+            pickerFaceW / ((pc[2] - pc[0]) * pickerXScale),
+            36 / (pc[3] - pc[1]));
+        if (!pickerProbe || pickerProbe.detail !== 2)
+            pickerFailures.push(`${f.id}: preset picker dropped portrait details`);
+        if (!pickerProbe || Math.abs(pickerProbe.scale - pickerScale) > 0.01)
+            pickerFailures.push(`${f.id}: preset picker is not scaled to its tight crop`);
+
+        /* Both vertical sides of the old crop need breathing room. This is
+         * the regression for crowns and chins being cut exactly at its edge;
+         * outer garment strokes may still leave the close-up intentionally. */
+        if (pc[1] >= f.crop[1] || pc[3] <= f.crop[3])
+            pickerFailures.push(`${f.id}: picker crop has no crown/chin padding`);
+
+        /* The live Officer page showed its mouth joined to the jaw, which
+         * reads as a severed chin. Fish has the same geometry inside its lip
+         * ring. Require at least one dark pixel between aperture and outline. */
+        const chin = {
+            fish: [0.80, 0.56, 0.645],
+            firefighter: [0.50, 0.44, 0.505],
+        }[f.id];
+        if (chin && pickerProbe) {
+            const x = Math.round(pickerProbe.x0 + chin[0] * pickerProbe.scale);
+            const y0 = Math.round(pickerProbe.y0 + chin[1] * pickerProbe.scale) + 1;
+            const y1 = Math.round(pickerProbe.y0 + chin[2] * pickerProbe.scale) - 1;
+            let gap = false;
+            for (let y = y0; y <= y1; y++)
+                if (!s.fb.pixels[y * s.fb.width + x]) { gap = true; break; }
+            if (!gap) pickerFailures.push(`${f.id}: mouth aperture merges into the chin outline`);
+        }
+
+        /* Render the WHOLE hardware page, not just the body tile: the real
+         * header and footer fonts plus the real frame offset expose collisions
+         * that disappear in a contact sheet of isolated 120x45 rectangles. */
+        const page = frameSurface(128, 64);
+        drawHeader(page.ctx, "S2 >* ROUND BASS", "FACE");
+        overlay.drawPage(frameCtx(page.ctx, { x: 4, y: 9, w: 120, h: 45 }), {
+            values: { face: f.id, vowel: 0.5 }, nowMs: 0,
+            preset: { name: "Ä", index: i, count: faces.length, entered: true },
+        });
+        drawFooter(page.ctx, [["JOG", "PRST"], ["CLK", "EDIT"], ["BACK", "OUT"]]);
+        pickerPageFrames.push(page.fb);
+        const pageClipped = typeof page.fb.clipped === "function"
+            ? page.fb.clipped() : (page.fb.clipped || 0);
+        if (pageClipped)
+            pickerFailures.push(`${f.id}: ${pageClipped} pixels clipped on the complete picker page`);
+
+        /* Five complete pages make the animation reviewable as pixels rather
+         * than as anchor numbers. Everything except the aperture is held
+         * constant, so differences inside the face region are mouth motion. */
+        const sweepPages = [];
+        const sweepFaces = [];
+        let invisibleMouths = 0;
+        for (let sweepIndex = 0; sweepIndex < SWEEP.length; sweepIndex++) {
+            const vowel = SWEEP[sweepIndex];
+            const body = frameSurface(120, 45);
+            overlay.drawPage(body.ctx, {
+                values: { face: f.id, vowel }, nowMs: 0,
+                preset: { name: "Ä", index: i, count: faces.length, entered: true },
+            });
+            sweepFaces.push(regionSignature(body.fb, 0, 0, pickerFaceW, 36));
+            if (pickerProbe) {
+                const mx = Math.round(pickerProbe.x0 + f.mc[0] * pickerProbe.xUnit);
+                const my = Math.round(pickerProbe.y0 + f.mc[1] * pickerProbe.scale);
+                if (countRect(body.fb, mx - 1, my - 1, 3, 3) === 0) invisibleMouths++;
+            }
+
+            const full = frameSurface(128, 64);
+            drawHeader(full.ctx, "S2 >* ROUND BASS", "FACE");
+            overlay.drawPage(frameCtx(full.ctx, { x: 4, y: 9, w: 120, h: 45 }), {
+                values: { face: f.id, vowel }, nowMs: 0,
+                preset: { name: "Ä", index: i, count: faces.length, entered: true },
+            });
+            drawFooter(full.ctx, [["JOG", "PRST"], ["CLK", "EDIT"], ["BACK", "OUT"]]);
+            sweepPages.push(full.fb);
+
+            /* Isolate the aperture through the real picker path. Device-size
+             * bounds enforce visibility; enlarged renders compare aspect ratio
+             * without one-pixel rounding disguising the underlying shape. */
+            const savedHead = f.head, savedEyes = f.eyes;
+            f.head = () => {};
+            f.eyes = () => {};
+            const isolated = frameSurface(120, 45);
+            overlay.drawPage(isolated.ctx, {
+                values: { face: f.id, vowel }, nowMs: 0,
+                preset: { name: f.name, index: i, count: faces.length, entered: true },
+            });
+            const pickerMouth = litBounds(isolated.fb, 0, 0, pickerFaceW, 36);
+
+            const largeCell = frameSurface(CELL_W * 10, CELL_H * 10);
+            drawThroughRegistry("custom:monkmouth", largeCell.ctx,
+                { values: { face: f.id, vowel }, group: { keys: ["vowel"] }, nowMs: 0 });
+            const largeWidgetMouth = litBounds(largeCell.fb, 0, 0, largeCell.fb.width, largeCell.fb.height);
+            const largePicker = frameSurface(1200, 450);
+            overlay.drawPage(largePicker.ctx, {
+                values: { face: f.id, vowel }, nowMs: 0,
+                preset: { name: f.name, index: i, count: faces.length, entered: true },
+            });
+            const largeFaceW = 1200 - Math.max(largePicker.ctx.textWidth("AH"), largePicker.ctx.textWidth(`${i + 1}/12`)) - 6;
+            const largePortraitMouth = litBounds(largePicker.fb, 0, 0, largeFaceW, 441);
+            f.head = savedHead;
+            f.eyes = savedEyes;
+            if (largeWidgetMouth && largePortraitMouth) {
+                const widgetAspect = largeWidgetMouth.w / largeWidgetMouth.h;
+                const portraitAspect = largePortraitMouth.w / largePortraitMouth.h;
+                if (Math.abs(Math.log(widgetAspect / portraitAspect)) > 0.12)
+                    pickerFailures.push(`${f.id}: ${vowel.toFixed(2)} mouth shape differs between Vowel widget (${largeWidgetMouth.w}x${largeWidgetMouth.h}) and portrait (${largePortraitMouth.w}x${largePortraitMouth.h})`);
+            } else {
+                pickerFailures.push(`${f.id}: ${vowel.toFixed(2)} mouth missing from widget/portrait comparison`);
+            }
+            if ((f.id === "fish" || f.id === "cat") &&
+                (!pickerMouth || pickerMouth.w < 4 || pickerMouth.h < 2 || pickerMouth.w * pickerMouth.h < 12))
+                pickerFailures.push(`${f.id}: ${vowel.toFixed(2)} portrait mouth is too hard to see (${pickerMouth ? `${pickerMouth.w}x${pickerMouth.h}` : "none"})`);
+        }
+        pickerSweepRows.push(sweepPages);
+
+        const uniqueMouthFrames = new Set(sweepFaces).size;
+        const endMotion = differingPixels(sweepFaces[0], sweepFaces[sweepFaces.length - 1]);
+        if (invisibleMouths)
+            pickerFailures.push(`${f.id}: mouth is invisible at ${invisibleMouths} vowel anchors`);
+        if (uniqueMouthFrames < 3 || endMotion < 4)
+            pickerFailures.push(`${f.id}: mouth movement does not read (${uniqueMouthFrames} shapes, ${endMotion} changed pixels)`);
+
+        const faceBounds = litBounds(s.fb, 0, 0, pickerFaceW, 36);
+        if (!faceBounds || faceBounds.w < 24 || faceBounds.h < 18)
+            pickerFailures.push(`${f.id}: picker head/silhouette is too small (${faceBounds ? `${faceBounds.w}x${faceBounds.h}` : "blank"})`);
+        if (f.id === "fish" && faceBounds && faceBounds.w < 45)
+            pickerFailures.push(`${f.id}: horizontal silhouette is only ${faceBounds.w}px wide (need 45)`);
     }
 
     /*
@@ -241,6 +558,9 @@ for (let i = 0; i < faces.length; i++) {
  */
 const MIN_LIT = [4, 4, 4, 4, 4, 40, 40, 60];  /* per column, in row order */
 const failures = [];
+failures.push(...portraitCropFailures);
+failures.push(...portraitCueFailures);
+failures.push(...pickerFailures);
 for (let r = 0; r < rows.length; r++) {
     for (let c = 0; c < rows[r].length; c++) {
         const lit = rows[r][c].countLit();
@@ -254,7 +574,36 @@ if (missing.size) failures.push(`glyphs missing from the device font: ${[...miss
 const out = sheet(rows);
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, out.toPng(3));
+if (PORTRAITS_OUT) {
+    const portraitRows = [];
+    for (let i = 0; i < portraitFrames.length; i += 3)
+        portraitRows.push(portraitFrames.slice(i, i + 3));
+    fs.mkdirSync(path.dirname(PORTRAITS_OUT), { recursive: true });
+    fs.writeFileSync(PORTRAITS_OUT, sheet(portraitRows, 4).toPng(3));
+}
+if (PICKERS_OUT) {
+    const pickerRows = [];
+    for (let i = 0; i < pickerFrames.length; i += 3)
+        pickerRows.push(pickerFrames.slice(i, i + 3));
+    fs.mkdirSync(path.dirname(PICKERS_OUT), { recursive: true });
+    fs.writeFileSync(PICKERS_OUT, sheet(pickerRows, 4).toPng(3));
+}
+if (PAGES_OUT) {
+    const pageRows = [];
+    for (let i = 0; i < pickerPageFrames.length; i += 3)
+        pageRows.push(pickerPageFrames.slice(i, i + 3));
+    fs.mkdirSync(path.dirname(PAGES_OUT), { recursive: true });
+    fs.writeFileSync(PAGES_OUT, sheet(pageRows, 4).toPng(3));
+}
+if (SWEEP_OUT) {
+    fs.mkdirSync(path.dirname(SWEEP_OUT), { recursive: true });
+    fs.writeFileSync(SWEEP_OUT, sheet(pickerSweepRows, 4).toPng(2));
+}
 console.log(`\n${faces.length} faces -> ${OUT}`);
+if (PORTRAITS_OUT) console.log(`portrait review sheet -> ${PORTRAITS_OUT}`);
+if (PICKERS_OUT) console.log(`preset-picker review sheet -> ${PICKERS_OUT}`);
+if (PAGES_OUT) console.log(`full preset-page review sheet -> ${PAGES_OUT}`);
+if (SWEEP_OUT) console.log(`full-page mouth sweep -> ${SWEEP_OUT}`);
 console.log(`clipped pixels: ${clipped} total (cells crop on purpose)`);
 console.log(`clipped on the PANEL: ${fullClipped}${fullClipped ? "   <-- art is running off the display" : ""}`);
 if (missing.size) console.log(`MISSING GLYPHS: ${[...missing].join(" ")}`);

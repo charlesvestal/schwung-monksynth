@@ -18,7 +18,7 @@ requested to make a donation at [savetibet.org](https://www.savetibet.org).
 - **Twelve characters as presets.** Jog the Presets page and each one loads its
   own voice *and* its own face. Six are hand-tuned (Monk, Fish, Unicorn, Little
   Girl, Old Man, Cow); six are upstream's own factory patches wearing new faces
-  (Dog, Ghost, Fire Fighter, Punk, Pizza, Cat).
+  (Dog, Ghost, Officer Eeoo, Punk, Pizza, Cat).
 - **Pad pressure sweeps the vowel.** The original did this with the pitch
   wheel; Move has neither a pitch wheel nor a mod wheel, so polyphonic
   aftertouch takes its place. Four routings: Vowel, Both, Both Inv, Pitch.
@@ -33,18 +33,17 @@ set of drawing functions:
 
 | Surface | Where | What it draws |
 |---|---|---|
-| `drawCell` (Who) | knob grid | the loaded character's head — a **readout**, `access: "read"` |
 | `drawCell` (Vowel) | knob grid | that character's **mouth**, cropped tight so the morph reads at 17×15 |
 | `card_script` | floats while Vowel turns | the face mouthing the vowel, plus the anchor name and a travel bar |
-| `type: "canvas"` | fullscreen | the whole character; the jog steps through all twelve |
+| `type: "canvas"` | fullscreen | a legible character portrait and live vowel readout |
+| `drawPage` | character picker | the same portrait construction, cropped for the 120×45 picker frame; the jog steps through all twelve |
 
 Building it turned up three host constraints. Two were limits worth removing,
 and they were fixed upstream rather than worked around here:
 
-- **One custom kind per module.** The host read a single `widgetKind` string, so
-  a second declared kind was silently dropped onto a built-in dial. Schwung now
-  takes `widgetKinds`; this module declares `custom:monkface` and
-  `custom:monkmouth` as the array form.
+- **A whole face is too small for a knob cell.** The first design spent a second
+  custom widget on a 17×15 character readout. It was an illegible blob, so the
+  grid now shows only the mouth and passes the character through `extra_keys`.
 - **A card could not see the page.** Its payload was `{w, h, name, value, raw}`,
   so it could not learn which character was loaded. It briefly went through a
   timestamped `globalThis` stamp — a side channel. The payload now carries
@@ -71,7 +70,7 @@ recorded in both so they cannot drift.
 
 ```bash
 ./scripts/build.sh          # cross-compiles for ARM64 in Docker
-./scripts/install.sh        # scp to move.local (no restart needed)
+./scripts/install.sh        # scp to move.local (restart shadow_ui for UI changes)
 ```
 
 ## Test

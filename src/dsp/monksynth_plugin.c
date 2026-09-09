@@ -171,7 +171,7 @@ static const monk_character_t CHARACTERS[CHAR_COUNT] = {
     { "ghost",       "Ghost",
       { 0.50f, 0.50f, 0.00f, 0.50f, 0.50f, 0.00f, 0.00f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.80f, 0.50f, 1.00f } },
     /* Dorje */
-    { "firefighter", "Fire Fighter",
+    { "firefighter", "Officer Eeoo",
       { 0.40f, 0.00f, 0.00f, 0.50f, 0.50f, 0.00f, 0.00f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.30f, 0.50f, 1.00f } },
     /* Jamyang */
     { "punk",        "Punk",
@@ -787,37 +787,24 @@ static const char UI_HIERARCHY_JSON[] =
      "{\"key\":\"vowel\"},{\"key\":\"head_size\"},{\"key\":\"aspiration\"},"
      "{\"key\":\"glide\"},{\"key\":\"vibrato\"},{\"key\":\"unison\"},"
      "{\"key\":\"delay\"},{\"key\":\"level\"},"
-     "{\"level\":\"envelope\",\"label\":\"Envelope\"},"
-     "{\"level\":\"unison\",\"label\":\"Unison\"},"
-     "{\"level\":\"motion\",\"label\":\"Vibrato\"},"
-     "{\"level\":\"echo\",\"label\":\"Delay\"},"
-     "{\"level\":\"expression\",\"label\":\"Expression\"}"
+     "{\"level\":\"effects\",\"label\":\"Voice Effects\"},"
+     "{\"level\":\"envelope\",\"label\":\"Envelope\"}"
    "]"
   "},"
+  /* Two full rows: ADSR stays intact on top, with the three expression-source
+   * controls below it. */
   "\"envelope\":{\"label\":\"Envelope\","
-   "\"knobs\":[\"attack\",\"decay\",\"sustain\",\"release\"],"
-   "\"params\":[{\"key\":\"attack\"},{\"key\":\"decay\"},{\"key\":\"sustain\"},{\"key\":\"release\"}]},"
-  "\"unison\":{\"label\":\"Unison\","
-   "\"knobs\":[\"unison\",\"unison_detune\",\"unison_spread\"],"
-   "\"params\":[{\"key\":\"unison\"},{\"key\":\"unison_detune\"},{\"key\":\"unison_spread\"}]},"
-  /*
-   * TWO LEVELS, NOT ONE "Vibrato and Delay".
-   *
-   * The combined name is the problem from both ends: "&" is a coin toss for a
-   * speech synth, and spelling it "and" truncates in the header to "VIBRATO
-   * AND", which reads as an unfinished phrase rather than a page. Two short
-   * names are complete in the header and complete out loud, and each page is
-   * about one thing.
-   */
-  "\"motion\":{\"label\":\"Vibrato\","
-   "\"knobs\":[\"vibrato\",\"vibrato_rate\"],"
-   "\"params\":[{\"key\":\"vibrato\"},{\"key\":\"vibrato_rate\"}]},"
-  "\"echo\":{\"label\":\"Delay\","
-   "\"knobs\":[\"delay\",\"delay_rate\"],"
-   "\"params\":[{\"key\":\"delay\"},{\"key\":\"delay_rate\"}]},"
-  "\"expression\":{\"label\":\"Expression\","
-   "\"knobs\":[\"pressure_routing\",\"pressure_depth\",\"bend_range\"],"
-   "\"params\":[{\"key\":\"pressure_routing\"},{\"key\":\"pressure_depth\"},{\"key\":\"bend_range\"}]}"
+   "\"knobs\":[\"attack\",\"decay\",\"sustain\",\"release\","
+               "\"pressure_routing\",\"pressure_depth\",\"bend_range\"],"
+   "\"params\":[{\"key\":\"attack\"},{\"key\":\"decay\"},{\"key\":\"sustain\"},{\"key\":\"release\"},"
+               "{\"key\":\"pressure_routing\"},{\"key\":\"pressure_depth\"},{\"key\":\"bend_range\"}]},"
+  /* Vibrato and delay fill row one. Unison's three controls therefore stay
+   * together on row two rather than wrapping across the grid boundary. */
+  "\"effects\":{\"label\":\"Voice Effects\","
+   "\"knobs\":[\"vibrato\",\"vibrato_rate\",\"delay\",\"delay_rate\","
+               "\"unison\",\"unison_detune\",\"unison_spread\"],"
+   "\"params\":[{\"key\":\"vibrato\"},{\"key\":\"vibrato_rate\"},{\"key\":\"delay\"},{\"key\":\"delay_rate\"},"
+               "{\"key\":\"unison\"},{\"key\":\"unison_detune\"},{\"key\":\"unison_spread\"}]}"
  "}"
 "}";
 

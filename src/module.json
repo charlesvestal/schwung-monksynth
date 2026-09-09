@@ -292,24 +292,12 @@
             "key": "level"
           },
           {
+            "level": "effects",
+            "label": "Voice Effects"
+          },
+          {
             "level": "envelope",
             "label": "Envelope"
-          },
-          {
-            "level": "unison",
-            "label": "Unison"
-          },
-          {
-            "level": "motion",
-            "label": "Vibrato"
-          },
-          {
-            "level": "echo",
-            "label": "Delay"
-          },
-          {
-            "level": "expression",
-            "label": "Expression"
           }
         ]
       },
@@ -319,7 +307,10 @@
           "attack",
           "decay",
           "sustain",
-          "release"
+          "release",
+          "pressure_routing",
+          "pressure_depth",
+          "bend_range"
         ],
         "params": [
           {
@@ -333,66 +324,7 @@
           },
           {
             "key": "release"
-          }
-        ]
-      },
-      "unison": {
-        "label": "Unison",
-        "knobs": [
-          "unison",
-          "unison_detune",
-          "unison_spread"
-        ],
-        "params": [
-          {
-            "key": "unison"
           },
-          {
-            "key": "unison_detune"
-          },
-          {
-            "key": "unison_spread"
-          }
-        ]
-      },
-      "motion": {
-        "label": "Vibrato",
-        "knobs": [
-          "vibrato",
-          "vibrato_rate"
-        ],
-        "params": [
-          {
-            "key": "vibrato"
-          },
-          {
-            "key": "vibrato_rate"
-          }
-        ]
-      },
-      "echo": {
-        "label": "Delay",
-        "knobs": [
-          "delay",
-          "delay_rate"
-        ],
-        "params": [
-          {
-            "key": "delay"
-          },
-          {
-            "key": "delay_rate"
-          }
-        ]
-      },
-      "expression": {
-        "label": "Expression",
-        "knobs": [
-          "pressure_routing",
-          "pressure_depth",
-          "bend_range"
-        ],
-        "params": [
           {
             "key": "pressure_routing"
           },
@@ -401,6 +333,41 @@
           },
           {
             "key": "bend_range"
+          }
+        ]
+      },
+      "effects": {
+        "label": "Voice Effects",
+        "knobs": [
+          "vibrato",
+          "vibrato_rate",
+          "delay",
+          "delay_rate",
+          "unison",
+          "unison_detune",
+          "unison_spread"
+        ],
+        "params": [
+          {
+            "key": "vibrato"
+          },
+          {
+            "key": "vibrato_rate"
+          },
+          {
+            "key": "delay"
+          },
+          {
+            "key": "delay_rate"
+          },
+          {
+            "key": "unison"
+          },
+          {
+            "key": "unison_detune"
+          },
+          {
+            "key": "unison_spread"
           }
         ]
       }
